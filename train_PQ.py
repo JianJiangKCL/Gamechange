@@ -17,7 +17,8 @@ from logger import config_logging
 from data import create_dataset
 import models as models
 from utils import CofStepController, set_seed
-
+from models import QuantHelper, FeatureQuantizer, QuantConv_DW, QuantConv_PW
+import gc
 
 def train_epoch(epoch, model, criterion, loader, optimizer, scaler, autocast, device, diff_cof=0.5, max_norm=0):
     cls_loss_meter, weight_diff_meter, feature_diff_meter, loss_meter, acc_meter = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
@@ -31,9 +32,10 @@ def train_epoch(epoch, model, criterion, loader, optimizer, scaler, autocast, de
             outputs = model(images)
             cls_loss = criterion(outputs, targets)
             weight_diff = model.accumlate_diff_weight()
+            # weight_diff = torch.Tensor([0])
             feature_diff = model.accumlate_diff_feature()
             loss = cls_loss + (weight_diff + feature_diff) * diff_cof
-            
+            # loss = cls_loss + feature_diff * diff_cof
         acc = accuracy(outputs, targets, topk=(1,))[0]
         
         # if not math.isfinite(loss.item()):
@@ -42,24 +44,26 @@ def train_epoch(epoch, model, criterion, loader, optimizer, scaler, autocast, de
         #     sys.exit(1)
             
         scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        if max_norm > 0.:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        # scaler.unscale_(optimizer)
+        # if max_norm > 0.:
+        #     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         scaler.step(optimizer)
         scaler.update()
         
         model.update_quantizer()
-        
+
+        #confirmed: even w/o meters, memory still leak
         cls_loss_meter.update(cls_loss.item(), batch_size)
-        weight_diff_meter.update(weight_diff)
-        feature_diff_meter.update(feature_diff, batch_size)
+        weight_diff_meter.update(weight_diff.item(), batch_size)
+        feature_diff_meter.update(feature_diff.item(), batch_size)
         loss_meter.update(loss.item(), batch_size)
-        acc_meter.update(acc, batch_size)
-                
-        loader.set_description(f'Epoch: {epoch+1}  CELoss:{cls_loss_meter.avg:.5f}  w_diff: {weight_diff_meter.avg:.5f}  '
+        acc_meter.update(acc.item(), batch_size)
+        #
+        description = (f'mem: {torch.cuda.max_memory_allocated()/1024/1024/1024:.2f}'
+                               f'Epoch: {epoch+1}  CELoss:{cls_loss_meter.avg:.5f}  w_diff: {weight_diff_meter.avg:.5f} '
                                f'f_diff: {feature_diff_meter.avg:.5f}  Total: {loss_meter.avg:.5f}  Acc: {acc_meter.avg:.5f}')
-        
-    logging.info(f'====> Train Epoch {epoch+1}: Train_acc {acc_meter.avg:.5f}')
+        loader.set_description(description)
+    logging.info(description)
         
         
 @torch.no_grad()
@@ -72,13 +76,13 @@ def test_epoch(epoch, model, loader, device):
         images, targets = images.to(device), targets.to(device)
         outputs = model(images)
         acc = accuracy(outputs, targets, topk=(1,))[0]
-        acc_meter.update(acc, batch_size)
+        acc_meter.update(acc.item(), batch_size)
         weight_diff = model.accumlate_diff_weight()
-        weight_diff_meter.update(weight_diff)
+        weight_diff_meter.update(weight_diff.item(), batch_size)
     
         loader.set_description(f'Epoch: {epoch+1}  w_diff: {weight_diff_meter.avg:.5f}  Acc: {acc_meter.avg:.5f}')
     logging.info(f'====> Test Epoch {epoch+1}: Test_acc {acc_meter.avg:.5f}')
-
+    return acc_meter.avg
 
 def main(args):
     result_path = os.path.join(args.root, args.result_dir, args.tag)
@@ -97,8 +101,15 @@ def main(args):
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, drop_last=False, num_workers=args.num_workers, pin_memory=True, shuffle=False)
     
     model = getattr(models, args.model)(in_channels, args.n_dw_emb, args.n_pw_emb, args.n_f_emb, num_classes, gs=1, out_planes=args.out_planes).to(args.device)
+
+
     inpt = torch.randn((1, in_channels, 28, 28)).to(args.device)
     model(inpt)
+    # for m in model.modules():
+    #     if isinstance(m, QuantHelper):
+    #         if not isinstance(m, FeatureQuantizer):
+    #             # m.set_quant_mode(args.quant_mode)
+    #             m.set_quant_mode(False)
     model.zero_buffer()
     del inpt
     
@@ -111,27 +122,49 @@ def main(args):
     
     #print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
+    flag_warm = True
+    best_acc = 0
     for epoch in range(args.epochs):
         train_epoch(epoch, model, criterion, train_loader, optimizer, scaler, autocast, args.device, cof_controller.cof, args.clip_grad)
-        test_epoch(epoch, model, test_loader, args.device)
+        acc = test_epoch(epoch, model, test_loader, args.device)
+        if acc > best_acc:
+            best_acc = acc
+            torch.save(model.state_dict(), os.path.join(ckpt_path, f'best_model.pth'))
+
+        if epoch >= args.warmup and flag_warm:
+            print("Start to quantize")
+            flag_warm = False
+            for m in model.modules():
+                if isinstance(m, FeatureQuantizer):
+                    if args.use_fq:
+                        m.set_quant_mode(True)
+                if isinstance(m, QuantConv_DW) or isinstance(m, QuantConv_PW):
+                    if args.use_wq:
+                        m.set_quant_mode(True)
+                # if isinstance(m, QuantHelper):
+                #     m.set_quant_mode(True)
+                    # m.set_quant_mode(True)
+
+
         
         cof_controller.step()
         
-        if (epoch + 1) % args.save_freq == 0 or (epoch + 1) == args.epochs:
-            torch.save({
-                'model': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'epoch': epoch + 1
-            }, os.path.join(ckpt_path, 'epoch_'+str(epoch)+'.pth'))        
-
+        # if (epoch + 1) % args.save_freq == 0 or (epoch + 1) == args.epochs:
+    torch.save({
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'epoch': epoch + 1
+    }, os.path.join(ckpt_path, 'epoch_'+str(epoch)+'.pth'))
+    logging.info(f'====> best Test_acc {best_acc:.5f}')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--batch_size", default=256, type=int)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=0)
     
     parser.add_argument("--root", default='./', type=str)
     parser.add_argument("--dataset", default='mnist', type=str)
@@ -148,10 +181,11 @@ if __name__ == "__main__":
     parser.add_argument("--diff-cof", default=0.5, type=float)
     parser.add_argument("--cof-gamma", default=5., type=float)
     parser.add_argument("--device", default='cuda', type=str)
-
+    parser.add_argument("--use_fq", action='store_true')
+    parser.add_argument("--use_wq", action='store_true')
     # Optimizer parameters
-    parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
-                        help='Optimizer (default: "adamw"')
+    parser.add_argument('--opt', default='adam', type=str, metavar='OPTIMIZER',
+                        help='Optimizer (default: "adam"')
     parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--clip-grad', type=float, default=0., metavar='NORM',
@@ -166,7 +200,7 @@ if __name__ == "__main__":
                         help='Turn on Automatic Mixed Precision')
     parser.add_argument('--disable-amp', action='store_false', dest='amp',
                         help='turn off Automatic Mixed Precision')
-    parser.set_defaults(amp=True)
+    parser.set_defaults(amp=True, use_fq=True, use_wq=True)
 
     args = parser.parse_args()
     set_seed(args.seed, args.device)
