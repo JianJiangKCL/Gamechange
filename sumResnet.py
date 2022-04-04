@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-from einops import rearrange, repeat, reduce
+from einops import rearrange, repeat
 from functools import partial, wraps
 
 
@@ -74,17 +74,15 @@ class QuantConv_PW(QuantHelper):
         self.out_planes = out_planes
         self.pw_weight = Parameter(torch.empty((out_planes * in_planes, 1, 1, 1)))
         nn.init.kaiming_normal_(self.pw_weight)
-        self.conv = partial(F.conv2d, stride=stride, padding=padding, groups=out_planes*in_planes)
+        self.conv = partial(F.conv2d, stride=stride, padding=padding)
         # self.f_bn = nn.BatchNorm2d(out_planes)
         # print(f'pw inc{self.in_planes}; out_c {self.out_planes}; groups:{self.groups}')
-        self.activation = nn.ReLU(inplace=True)
+
 
 
     def forward(self, x, *args):
-        x = repeat(x, 'b c h w -> b (repeat c) h w', repeat=self.out_planes)
-        # pw_weight = rearrange(self.pw_weight, '(o i) () h w -> o i h w', o=self.out_planes, i=self.in_planes, h=self.pw_weight.shape[-2], w=self.pw_weight.shape[-1])
-        out = self.activation(self.conv(x, self.pw_weight))
-        out = reduce(out, 'b (o i) h w -> b o h w', o=self.out_planes, i=self.in_planes, reduction='sum')
+        pw_weight = rearrange(self.pw_weight, '(o i) () h w -> o i h w', o=self.out_planes, i=self.in_planes, h=self.pw_weight.shape[-2], w=self.pw_weight.shape[-1])
+        out = self.conv(x, pw_weight)
         return out
 
 
@@ -131,14 +129,14 @@ class QuantBasicBlock(nn.Module):
 
     def forward(self, x):
         out = self.activation(self.conv1(x))
-        out = self.conv2(out)
+        out = self.activation(self.conv2(out))
         return out
 
 
 class QuantNet(nn.Module):
     def __init__(self, in_channels, block, num_blocks, num_classes, inplanes=3,  layers=2):
         super().__init__()
-
+        global group_list
         self.inplanes = inplanes
         self.out_planes = inplanes
 
