@@ -12,6 +12,20 @@ from functools import partial, wraps
 from classifiers import Quantizer
 from torchvision.models import resnet18, mobilenet_v2
 
+class Acti(nn.Module):
+
+    __constants__ = ['inplace']
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super(Acti, self).__init__()
+        self.t = torch.Tensor([0]).cuda()
+    def forward(self, input):
+
+        out = (input > self.t).float()
+        return out
+
+
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=dilation, groups=groups, bias=False, dilation=dilation)
@@ -89,22 +103,27 @@ class QuantConv_DW(QuantHelper):
         self.group_list = copy.deepcopy(group_list)
         self.group_list.reverse()
 
+        self.acti = Acti()
 
     
     def normal_forward(self, x, x2, *args):
         dw_weight = repeat(self.dw_weight, 'o i h w -> (o repeat) i h w',
                            repeat=self.prod_dw_in_planes // self.in_planes)
         out1 = self.conv(x, dw_weight)
+        # out1 = F.relu(out1)
+
         summed_out1 = out1
         for in_planes in self.group_list:
             summed_out1 = reduce(summed_out1, 'b (o i) h w -> b o h w', i=in_planes, reduction='sum')
 
+
+
         tmp_sum_dw_weight = self.dw_weight
         out2 = self.sum_conv(x2, tmp_sum_dw_weight)
 
-        is_equal = torch.equal(summed_out1, out2)
+        is_equal = torch.equal(out2, summed_out1)
         print(is_equal)
-        print((summed_out1 - out2).abs().sum())
+        print((out2 - summed_out1).abs().mean())
         return out1, out2
     
     def quant_forward(self, x, quantizer):
@@ -133,8 +152,7 @@ class QuantConv_PW(QuantHelper):
 
         self.conv = partial(F.conv2d, stride=stride, padding=padding, groups=self.groups)
         self.sum_conv = partial(F.conv2d, stride=stride, padding=padding)
-        # self.f_bn = nn.BatchNorm2d(out_planes)
-        #print(f'pw inc{self.in_planes}; out_c {self.out_planes}; groups:{self.groups}')
+        self.acti = Acti()
 
     def get_groups(self):
         return self.groups
@@ -145,22 +163,30 @@ class QuantConv_PW(QuantHelper):
     def normal_forward(self, x, x2, *args):
         tmp_x = repeat(x, 'b c h w -> b (repeat c) h w', repeat=self.out_planes)
         h, w = self.pw_weight.shape[-2:]
-        pw_weight = repeat(self.pw_weight, 'o i h w -> o (repeat i) h w',
-                           repeat=self.prod_dw_in_planes // self.in_planes)
+        pw_weight = repeat(self.pw_weight, 'o i h w -> o (repeat i) h w', repeat=self.prod_dw_in_planes // self.in_planes)
         pw_weight = rearrange(pw_weight, 'o i h w -> (o i) () h w', h=h, w=w)
         out1 = self.conv(tmp_x, pw_weight)
-        summed_out1 = out1
-        for in_planes in self.group_list:
-            summed_out1 = reduce(summed_out1, 'b (o i) h w -> b o h w', i=in_planes, reduction='sum')
+
+        summed_out1 = reduce(out1, 'b (o i) h w -> b o h w', i=self.in_planes, reduction='sum')
+
+        # the latest layer acti
+        flag = self.acti(summed_out1)
+        flag = repeat(flag, 'b o h w -> b (o repeat) h w', repeat=self.in_planes)
+        out1 = out1 * flag
+
+        relu_summed_out1 = out1
+        if self.group_list:
+            for in_planes in self.group_list:
+                relu_summed_out1 = reduce(relu_summed_out1, 'b (o i) h w -> b o h w', i=in_planes, reduction='sum')
 
         tmp_sum_pw_weight = rearrange(self.pw_weight, '(o i) () h w -> o i h w', h=h, w=w, o=self.out_planes,
                                       i=self.in_planes)
         out2 = self.sum_conv(x2, tmp_sum_pw_weight)
-
-        is_equal = torch.equal(summed_out1, out2)
+        relu_out2 = F.relu(out2)
+        is_equal = torch.equal(relu_out2, relu_summed_out1)
         print(is_equal)
-        print((summed_out1 - out2).abs().sum())
-        return out1, out2
+        print((relu_out2 - relu_summed_out1).abs().mean())
+        return out1, relu_out2
     
     def quant_forward(self, x, quantizer):
         x = repeat(x, 'b c h w -> b (repeat c) h w', repeat=self.out_planes)
@@ -252,9 +278,9 @@ class QuantBasicBlock(nn.Module):
 
     def forward(self, x, x2):
         out, out2 = self.conv1(x, x2)
-        # out, out2 = self.activation(out), self.activation(out2)
+        # out2 = self.activation(out2)
         out, out2 = self.conv2(out, out2)
-        # out, out2 = self.activation(out), self.activation(out2)
+        # out2 = self.activation(out2)
         return out, out2
         
 
@@ -284,6 +310,7 @@ class QuantNet(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         # self.head = nn.Linear(inplanes*2 * block.expansion, num_classes)
         self.head = nn.Linear(inplanes_list[self.layers-1] * block.expansion, num_classes)
+        self.activation = nn.ReLU(inplace=True)
         self._get_groups_pw_out_planes()
     # n_dw_emb, n_pw_emb, n_f_emb, in_planes, out_planes, stride=1, gs=1):
     def _make_layer(self, block, out_planes, num_blocks, stride, n_dw_emb, n_pw_emb, gs, n_f_emb):
@@ -310,29 +337,20 @@ class QuantNet(nn.Module):
         h = self.conv1(x)
         h, h2 = self.convs(h, h)
 
-        # # implement1
-        # h = rearrange(h, 'b c h w -> b h w c')
-        # h = h.view(*h.size()[:3], *self.group_list, self.out_planes)
-        # h = h.view(*h.size()[:3], *self.group_list, self.out_planes)
-        # h = h.sum(dim=-1)
-        # for i in range(len(self.group_list), 1, -1):
-        #     h = h.sum(dim=i+2)
-        # h = rearrange(h, 'b h w c-> b c h w')
-        # # implement2
         summed_h = h
         for in_planes in self.group_list:
-            summed_h = reduce(summed_h, 'b (o i) h w -> b o h w', i=in_planes, reduction='sum')
+            summed_h = F.relu(reduce(summed_h, 'b (o i) h w -> b o h w', i=in_planes, reduction='sum'))
+
         h = self.avg_pool(summed_h)
         h = h.view(h.size(0), -1)
-
-        h = self.head(h)
+        pred = self.head(h)
         
         h2 = self.avg_pool(h2)
         h2 = h2.view(h2.size(0), -1)
 
-        h2 = self.head(h2)
+        pred2 = self.head(h2)
         
-        return h, h2
+        return pred, pred2
 
     
     def accumlate_diff_feature(self):
