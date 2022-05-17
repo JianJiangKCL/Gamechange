@@ -35,6 +35,10 @@ class Quantizer(nn.Module):
 		self.register_buffer("acum_embed_sum", torch.zeros_like(self.embed))
 		self.register_buffer("acum_embed_onehot_sum", torch.zeros(n_embed))
 
+
+	def set_decay(self, decay):
+		self.decay = decay
+
 	def zero_buffer(self):
 		self.acum_embed_sum.zero_()
 		self.acum_embed_onehot_sum.zero_()

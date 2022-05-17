@@ -30,6 +30,7 @@ class QuantHelper(nn.Module):
         self.diff = 0
         self.weight_initalized = False
 
+
     def set_quant_mode(self, quant=True):
         self.use_quant = quant
 
@@ -44,6 +45,8 @@ class QuantHelper(nn.Module):
 
     def quant_forward(self, *args):
         pass
+
+
 
     def forward(self, *args):
         if not self.weight_initalized and hasattr(self, '_init_components'):
@@ -62,6 +65,8 @@ class FeatureQuantizer(QuantHelper):
         self.target = QUANT_TYPE.FEATURE
         self.quantizer = Quantizer(dim, n_emb, decay)
         self.diff = torch.Tensor([0]).cuda()
+
+
 
     def normal_forward(self, x):
         return x
@@ -125,11 +130,9 @@ class QuantConv_PW(QuantHelper):
         h, w = self.pw_weight.shape[-2:]
         pw_weight = repeat(self.pw_weight, 'o i h w -> o (repeat i) h w', repeat=self.fake_inplanes // self.in_planes)
         pw_weight = rearrange(pw_weight, 'o i h w -> (o i) () h w', h=h, w=w)
-        # print('x', x)
-        # print('weight', pw_weight)
+
         out = self.conv(x, pw_weight)
-        # print('out', out)
-        # self.diff = torch.Tensor([0]).cuda()
+
         return out
 
     def quant_forward(self, x, quantizer):
@@ -152,11 +155,12 @@ class Quant_dwpw2(QuantHelper):
         self.ret_x = ret_x
         self.n_f_emb = n_f_emb
         self.decay = decay
-
+        self.use_quant = True
         # print('fake_inplanes:', fake_inplanes)
         self.in_planes = in_planes
         self.out_planes = out_planes
         self.dw_conv = QuantConv_DW(in_planes, in_planes, kernel_size, stride, padding)
+        self.bn1 = nn.BatchNorm2d(in_planes)
         fake_inplanes = in_planes
         self.pw_conv = QuantConv_PW(fake_inplanes, in_planes, out_planes)
 
@@ -171,10 +175,11 @@ class Quant_dwpw2(QuantHelper):
         self.dw_conv2 = QuantConv_DW(fake_inplanes, out_planes, kernel_size, stride, padding)
 
         self.pw_conv2 = QuantConv_PW(fake_inplanes, out_planes, out_planes)
-
+        self.bn2 = nn.BatchNorm2d(out_planes)
         self.quantizer_dw2 = Quantizer(kernel_size ** 2, n_dw_emb)
         self.quantizer_pw2 = Quantizer(1, n_pw_emb)
-
+        # self.activation = nn.ReLU(inplace=True)
+        self.activation = nn.LeakyReLU(0.1, inplace=True)
         self.n_fdw_emb2 = self.n_f_emb
         self.n_fpw_emb2 = self.n_f_emb
 
@@ -198,46 +203,75 @@ class Quant_dwpw2(QuantHelper):
         k=1
 
     def normal_forward(self, x):
-        h_dw = self.dw_conv(x, self.quantizer_dw)
-        h_pw = self.pw_conv(h_dw, self.quantizer_pw)
-        return (h_pw, x) if self.ret_x else h_pw
+        h = self.dw_conv(x, self.quantizer_dw)
+        # h = self.bn1(h)
+        h = self.activation(h)
+
+        h = self.pw_conv(h, self.quantizer_pw)
+        h = self.dw_conv2(h, self.quantizer_dw2)
+        h = self.pw_conv2(h, self.quantizer_pw2)
+        h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.out_planes, reduction='sum')
+        h = self.bn2(h)
+        h = self.activation(h)
+        return h
 
     def quant_forward(self, x):
-        # h_dw = self.f_bn1(x)
         h_dw = self.feat_quantizer_dw(x)
-
         h_dw = self.dw_conv(h_dw, self.quantizer_dw)
-        # h_dw = self.f_bn2(h_dw)
+        # h_dw = self.bn1(h_dw)
+        h_dw = self.activation(h_dw)
+
+
         h_pw = self.feat_quantizer_pw(h_dw)
         h_pw = self.pw_conv(h_pw, self.quantizer_pw)
+
+        h_pw = self.feat_quantizer_dw2(h_pw)
         h_dw2 = self.dw_conv2(h_pw, self.quantizer_dw2)
         h_pw2 = self.feat_quantizer_pw2(h_dw2)
 
         h = self.pw_conv2(h_pw2, self.quantizer_pw2)
         # summation
-        n_group_member = self.fake_inplanes // self.out_planes
         h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.out_planes, reduction='sum')
-
+        h = self.bn2(h)
+        h = self.activation(h)
         return h
 
+    # def forward(self, x):
+    #     if self.use_quant:
+    #         return self.quant_forward(x)
+    #     else:
+    #         return self.normal_forward(x)
 
 class QuantBasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, n_dw_emb, n_pw_emb, n_f_emb, in_planes, out_planes, stride=1, gs=1):
+    def __init__(self, n_dw_emb, n_pw_emb, n_f_emb, in_planes, out_planes, stride=1, gs=1, decay=0.99):
         super().__init__()
 
         self.conv = Quant_dwpw2(in_planes, out_planes, n_dw_emb, n_pw_emb, n_f_emb, stride=stride, padding=1, gs=gs,
-                                ret_x=False)
+                                ret_x=False, decay=decay)
 
-        self.activation = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        out = self.activation(self.conv(x))
+        out = self.conv(x)
 
         # todo maybe bn as well
         return out
 
+    def straight_mode_(self):
+        for m in self.modules():
+            if isinstance(m, QuantHelper):
+                m.disable_quant()
+
+    def quant_mode_(self):
+        for m in self.modules():
+            if isinstance(m, QuantHelper):
+                m.enable_quant()
+
+    def set_block_qtz_decay(self, decay):
+        for m in self.modules():
+            if isinstance(m, Quantizer):
+                m.set_decay(decay)
 
 class QuantNet(nn.Module):
     def __init__(self, in_channels, n_dw_emb, n_pw_emb, n_f_emb, block, num_blocks, num_classes, gs, out_planes=3,
@@ -247,41 +281,44 @@ class QuantNet(nn.Module):
         self.inplanes = out_planes
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, out_planes, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.Conv2d(in_channels, out_planes, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(out_planes),
-            nn.ReLU(inplace=True))
+            nn.LeakyReLU(0.1, inplace=True))
         # the first dwpw layer has fake_inplanes = 1
         self.convs = nn.Sequential()
-        strides = [1, 2, 2]
+        # if strides=1 will add much more computation
+        strides = [2, 2, 2] #[1, 2, 2]
         out_planes_list = [out_planes, out_planes * 2, out_planes * 4]
-        self.layers = layers
-        self.convs = QuantBasicBlock(n_dw_emb, n_pw_emb, n_f_emb, self.inplanes, out_planes, strides[0], gs)
+        # self.layers = layers
+        layer_maker = partial(QuantBasicBlock, n_dw_emb=n_dw_emb, n_pw_emb=n_pw_emb, n_f_emb=n_f_emb, gs=gs)
+        decays = [0.99, 0.99]
+        #  in_planes, out_planes, stride=1,
+        self.layer1 = layer_maker(in_planes=self.inplanes, out_planes=out_planes_list[0], stride=strides[0], decay=decays[0])
 
+        self.layer2 = layer_maker(in_planes=out_planes_list[0], out_planes=out_planes_list[1], stride=strides[1], decay=decays[1])
+
+        # self.layer2.straight_mode_()
 
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.head = nn.Linear(out_planes, num_classes)
+        self.head = nn.Linear(out_planes_list[1], num_classes)
 
-    def _make_layer(self, block, out_planes, num_blocks, stride, n_dw_emb, n_pw_emb, gs, n_f_emb):
-        strides = [stride] + [1] * (num_blocks - 1)
-        block_net = nn.Sequential()
-        for i in range(len(strides)):
-            block_net.add_module(f'QuantRes{i + 1}',
-                                 block(n_dw_emb, n_pw_emb, n_f_emb, self.fake_inplanes, self.inplanes, out_planes,
-                                       strides[i], gs))
-            self.inplanes = out_planes * block.expansion
 
-        return block_net
 
     def forward(self, x):
         h = self.conv1(x)
-        h = self.convs(h)
-
+        h = self.layer1(h)
+        h = self.layer2(h)
         h = self.avg_pool(h)
         h = h.view(h.size(0), -1)
 
         h = self.head(h)
         return h
+
+    def set_qtz_decay(self, decay):
+        for m in self.modules():
+            if isinstance(m, Quantizer):
+                m.set_decay(decay)
 
     def accumlate_diff_feature(self):
         return sum([module.diff for module in self.modules() if
@@ -302,6 +339,10 @@ class QuantNet(nn.Module):
             if isinstance(module, Quantizer):
                 module.zero_buffer()
 
+    def disable_quantizer(self):
+        for module in self.modules():
+            if isinstance(module, QuantHelper):
+                module.disable_quant()
 
 def QuantNet9(in_channels, n_dw_emb, n_pw_emb, n_f_emb, num_classes, gs, **kwargs):
     model = QuantNet(in_channels, n_dw_emb, n_pw_emb, n_f_emb, QuantBasicBlock, [1, 1], num_classes, gs, **kwargs)

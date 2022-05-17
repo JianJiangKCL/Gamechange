@@ -56,6 +56,8 @@ def main(local_rank, args):
         kwargs['strategy'] = 'ddp'
     trainer = Trainer.from_argparse_args(args, **kwargs)
     model = AqMethod(args, backbone)
+    if args.method == 'normal':
+        model.disable_quantizer()
     trainer.fit(model, train_loader)
 
     trainer.test(model, test_loader)

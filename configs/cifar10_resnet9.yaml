@@ -1,6 +1,6 @@
 #project
 project: AQ
-name: mnist
+name: cifar10_resnet9
 ## general args
 # model
 arch : resnet9
@@ -16,8 +16,8 @@ beta : 0.5
 gs : 1
 
 # train
-lr : 0.01
-epoch : 60
+lr : 0.06
+epoch : 800
 num_workers : 4
 batch_size : 128
 optimizer : adam
@@ -27,7 +27,7 @@ use_amp : 1
 method : aq
 warm_epoch : 10
 # data
-dataset : mnist
+dataset : cifar10
 
 
 

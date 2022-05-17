@@ -11,6 +11,7 @@ import torch.nn as nn
 import torchmetrics
 import torch
 import wandb
+from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
 class AqMethod(pl.LightningModule):
     args: AttributeDict
 
@@ -21,7 +22,7 @@ class AqMethod(pl.LightningModule):
         self.accuracy = torchmetrics.Accuracy(top_k=1)
         self.criterion = nn.CrossEntropyLoss()
         self.args = args
-
+        self.flag_decay = True
         if backbone is None:
             self.backbone = create_backbone(args)
         else:
@@ -40,10 +41,15 @@ class AqMethod(pl.LightningModule):
             MILESTONES = list((map(op_multi, [0.5, 0.8], [self.args.epoch, self.args.epoch])))
         else:
             raise NotImplementedError
-        scheduler = MultiStepLR(opt, milestones=MILESTONES, gamma=0.1)
+        # scheduler = MultiStepLR(opt, milestones=MILESTONES, gamma=0.1)
+        scheduler = CosineAnnealingLR(opt, self.args.epoch, eta_min=0.0006)
         return [opt], [scheduler]
 
     def training_step(self, batch, batch_idx):
+        # if self.current_epoch < self.args.warm_epoch:
+        #     self.backbone.layer2.straight_mode_()
+        # else:
+        #     self.backbone.layer2.quant_mode_()
         x, y = batch
         y_hat = self.backbone(x)
 
@@ -52,8 +58,14 @@ class AqMethod(pl.LightningModule):
         weight_diff = self.backbone.accumlate_diff_weight()
 
         feature_diff = self.backbone.accumlate_diff_feature()
+        # if self.current_epoch > 10:
+        #     # if self.flag_decay:
+        #     #     self.backbone.set_qtz_decay(0.9999)
+        #     #     self.flag_decay = False
+        #     loss = ce_loss + (weight_diff * 0.001) + feature_diff * 0.1
+        # else:
+        # loss = ce_loss + (weight_diff * 0.001) + feature_diff    #* self.args.beta
         loss = ce_loss + (weight_diff + feature_diff) * self.args.beta
-
         self.backbone.update_quantizer()
         self.accuracy.update(y_hat, y)
         acc = self.accuracy.compute()
@@ -99,3 +111,5 @@ class AqMethod(pl.LightningModule):
 
         self.accuracy.reset()
 
+    def disable_quantizer(self):
+        self.backbone.disable_quantizer()
