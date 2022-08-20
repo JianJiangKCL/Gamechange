@@ -11,19 +11,18 @@ arch : resnet9
 n_dw_emb : 512
 n_pw_emb : 512
 n_f_emb : 512
-out_planes: 32
+out_planes: 64
 beta : 0.5
 gs : 1
 
 # train
-lr : 0.06
-epoch : 800
+lr : 0.001
+epochs : 800
 num_workers : 4
 batch_size : 128
 optimizer : adam
-distributed : 0
-gpus : 1
-use_amp : 1
+
+use_amp : 0
 method : aq
 warm_epoch : 10
 # data

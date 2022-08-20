@@ -44,12 +44,30 @@ class Quantizer(nn.Module):
 		self.acum_embed_onehot_sum.zero_()
 
 	def update(self):
+		# this cannot help to reduce the fq loss.
 		# embed_sum_norm = normalize_tensor(self.acum_embed_sum / (self.acum_embed_onehot_sum + self.eps), dim=0)
 		embed_sum_norm = self.acum_embed_sum / (self.acum_embed_onehot_sum + self.eps)
 		self.embed_avg.data.mul_(self.decay).add_(embed_sum_norm, alpha=1 - self.decay)
 		# self.embed_avg.copy_(embed_sum_norm)
 		self.embed.data.copy_(self.embed_avg)
 
+	# def update(self):
+	#
+	# 	self.cluster_size.data.mul_(self.decay).add_(
+	# 		self.acum_embed_onehot_sum, alpha=1 - self.decay
+	# 	)
+	# 	# #   an embedding is learnt from its old value and its members' value;
+	#
+	# 	self.embed_avg.data.mul_(self.decay).add_(self.acum_embed_sum, alpha=1 - self.decay)
+	# 	n = self.cluster_size.sum()
+	# 	# n will never be 0
+	#
+	# 	cluster_size = (
+	# 			(self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
+	# 	)
+	# 	print(cluster_size)
+	# 	embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
+	# 	self.embed.data.copy_(embed_normalized)
 	def forward(self, input):
 		flatten = input.reshape(-1, self.dim)
 		dist = torch.cdist(flatten, self.embed.permute(1, 0), compute_mode="use_mm_for_euclid_dist")

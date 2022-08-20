@@ -1,17 +1,13 @@
 import torch
 from collections import OrderedDict
-import random
 import numpy as np
 import os
 import logging.config
-import matplotlib.pyplot as plt
 import random
 import yaml
-from tqdm import tqdm
 import re
 import logging
 import itertools
-# original saved file with DataParallel
 
 class Namespace(object):
     def __init__(self, somedict):
@@ -26,6 +22,7 @@ class Namespace(object):
 
         raise AttributeError(
             f"Can not find {attribute} in namespace. Please write {attribute} in your config file(xxx.yaml)!")
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -93,10 +90,12 @@ def config_logging(log_file='imgnet32_log.txt', resume=False):
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
 
+
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
         for param in model.parameters():
             param.requires_grad = False
+
 
 def load_state_from_ddp(model, state_dict):
     # create new OrderedDict that does not contain `module.`
@@ -115,25 +114,6 @@ def load_state_from_ddp(model, state_dict):
     model.load_state_dict(new_state_dict)
     return model
 
-def classification_accuracy(output, target):
-    # get the index of the max log-probability
-    pred = output.max(1, keepdim=True)[1]
-    return pred.eq(target.view_as(pred)).cpu().float().mean()
-
-class Metric(object):
-    def __init__(self, name):
-        self.name = name
-        self.sum = torch.tensor(0.)
-        self.n = torch.tensor(0.)
-        return
-
-    def update(self, val, num):
-        self.sum += val.cpu() * num
-        self.n += num
-
-    @property
-    def avg(self):
-        return self.sum / self.n
 
 def str_to_dict(command):
     d = {}

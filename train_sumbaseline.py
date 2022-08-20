@@ -19,7 +19,7 @@ from data import create_dataset
 import sumResnet as models
 from utils import CofStepController, set_seed
 
-def train_epoch(epoch, model, criterion, loader, optimizer, scaler, autocast, device):
+def train_epoch(epochs, model, criterion, loader, optimizer, scaler, autocast, device):
     cls_loss_meter, weight_diff_meter, feature_diff_meter, loss_meter, acc_meter = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
     loader = tqdm(loader)
     model.train()
@@ -48,13 +48,13 @@ def train_epoch(epoch, model, criterion, loader, optimizer, scaler, autocast, de
         acc_meter.update(acc.item(), batch_size)
         #
         description = (f'mem: {torch.cuda.max_memory_allocated()/1024/1024/1024:.2f} '
-                               f'Epoch: {epoch+1}  CELoss:{cls_loss_meter.avg:.3f}   Acc: {acc_meter.avg:.3f}')
+                               f'epochs: {epochs+1}  CELoss:{cls_loss_meter.avg:.3f}   Acc: {acc_meter.avg:.3f}')
         loader.set_description(description)
-    logging.info(f"===>Train Epoch {epoch+1}" + description)
+    logging.info(f"===>Train epochs {epochs+1}" + description)
         
         
 @torch.no_grad()
-def test_epoch(epoch, model, loader, device):
+def test_epoch(epochs, model, loader, device):
     acc_meter, weight_diff_meter = AverageMeter(), AverageMeter()
     loader = tqdm(loader)
     model.eval()
@@ -65,8 +65,8 @@ def test_epoch(epoch, model, loader, device):
         acc = accuracy(outputs, targets, topk=(1,))[0]
         acc_meter.update(acc.item(), batch_size)
         # break
-        loader.set_description(f'Epoch: {epoch+1}   Acc: {acc_meter.avg:.3f}')
-    logging.info(f'====> Test Epoch {epoch+1}: Test_acc {acc_meter.avg:.3f}')
+        loader.set_description(f'epochs: {epochs+1}   Acc: {acc_meter.avg:.3f}')
+    logging.info(f'====> Test epochs {epochs+1}: Test_acc {acc_meter.avg:.3f}')
     return acc_meter.avg
 
 def main(args):
@@ -101,9 +101,9 @@ def main(args):
     start_time = time.time()
     flag_warm = True
     best_acc = 0
-    for epoch in range(args.epochs):
-        train_epoch(epoch, model, criterion, train_loader, optimizer, scaler, autocast, args.device)
-        acc = test_epoch(epoch, model, test_loader, args.device)
+    for epochs in range(args.epochs):
+        train_epoch(epochs, model, criterion, train_loader, optimizer, scaler, autocast, args.device)
+        acc = test_epoch(epochs, model, test_loader, args.device)
         if acc > best_acc:
             best_acc = acc
             torch.save(model.state_dict(), os.path.join(ckpt_path, f'best_model.pth'))
@@ -111,8 +111,8 @@ def main(args):
     torch.save({
         'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
-        'epoch': epoch + 1
-    }, os.path.join(ckpt_path, 'epoch_'+str(epoch)+'.pth'))
+        'epochs': epochs + 1
+    }, os.path.join(ckpt_path, 'epoch_'+str(epochs)+'.pth'))
     logging.info(f'====> best Test_acc {best_acc:.3f}')
 
 if __name__ == "__main__":

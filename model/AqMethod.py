@@ -11,7 +11,10 @@ import torch.nn as nn
 import torchmetrics
 import torch
 import wandb
-from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
+
+from funcs.module_funcs import setup_optimizer, setup_scheduler
+
+
 class AqMethod(pl.LightningModule):
     args: AttributeDict
 
@@ -19,7 +22,9 @@ class AqMethod(pl.LightningModule):
         super(AqMethod, self).__init__()
         self.acc_sum = 0
         self.n_sum = 0
-        self.accuracy = torchmetrics.Accuracy(top_k=1)
+        self.train_accuracy = torchmetrics.Accuracy(top_k=1)
+        self.val_accuracy = torchmetrics.Accuracy(top_k=1)
+        self.test_accuracy = torchmetrics.Accuracy(top_k=1)
         self.criterion = nn.CrossEntropyLoss()
         self.args = args
         self.flag_decay = True
@@ -28,22 +33,11 @@ class AqMethod(pl.LightningModule):
         else:
             self.backbone = backbone
 
-    # this is used for setting the temporary weights get close to the selected kernels
-
     def configure_optimizers(self):
-        
-        op_multi = lambda a, b: int(a * b)
-        if self.args.optimizer == 'adam':
-            opt = optim.Adam(self.backbone.parameters(), lr=self.args.lr)
-            MILESTONES = list((map(op_multi, [0.5], [self.args.epoch])))
-        elif self.args.optimizer == 'sgd':
-            opt = optim.SGD(self.backbone.parameters(), lr=self.args.lr, momentum=0.9, weight_decay=4e-5, nesterov=True)
-            MILESTONES = list((map(op_multi, [0.5, 0.8], [self.args.epoch, self.args.epoch])))
-        else:
-            raise NotImplementedError
-        # scheduler = MultiStepLR(opt, milestones=MILESTONES, gamma=0.1)
-        scheduler = CosineAnnealingLR(opt, self.args.epoch, eta_min=0.0006)
-        return [opt], [scheduler]
+
+        opt = setup_optimizer(self.args, self.backbone)
+        scheduler, interval = setup_scheduler(self.args, opt)
+        return [opt], [{"scheduler": scheduler, "interval": interval}]
 
     def training_step(self, batch, batch_idx):
         # if self.current_epoch < self.args.warm_epoch:
@@ -65,20 +59,18 @@ class AqMethod(pl.LightningModule):
         #     loss = ce_loss + (weight_diff * 0.001) + feature_diff * 0.1
         # else:
         # loss = ce_loss + (weight_diff * 0.001) + feature_diff    #* self.args.beta
-        loss = ce_loss + (weight_diff + feature_diff) * self.args.beta
+        loss = ce_loss + (weight_diff * self.args.beta_w + feature_diff * self.args.beta_f) * self.args.beta
         self.backbone.update_quantizer()
-        self.accuracy.update(y_hat, y)
-        acc = self.accuracy.compute()
+        self.train_accuracy.update(y_hat, y)
+        acc = self.train_accuracy.compute()
         # no need to do the .item() here. no memory leak
         log_data = {
-
             'loss': loss,
             'ce_loss': ce_loss,
             'w_diff': weight_diff,
             'f_diff': feature_diff,
             'acc': acc,
             'GB': torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
-
         }
 
         self.log_dict(log_data, prog_bar=True)
@@ -86,9 +78,8 @@ class AqMethod(pl.LightningModule):
 
     def training_epoch_end(self, outputs):
         if self.global_rank == 0:
-            print('accuracy:', self.accuracy.compute())
-        self.accuracy.reset()
-
+            print('accuracy:', self.train_accuracy.compute())
+        self.train_accuracy.reset()
 
     def validation_step(self, batch, batch_idx):
         pass
@@ -97,8 +88,8 @@ class AqMethod(pl.LightningModule):
         x, y = batch
         y_hat = self.backbone(x)
         test_loss = F.cross_entropy(y_hat, y)
-        self.accuracy.update(y_hat, y)
-        acc = self.accuracy.compute()
+        self.test_accuracy.update(y_hat, y)
+        acc = self.test_accuracy.compute()
         log_data = {
             'test_loss': test_loss.item(),
 
@@ -109,7 +100,7 @@ class AqMethod(pl.LightningModule):
 
     def test_epoch_end(self, outputs):
 
-        self.accuracy.reset()
+        self.test_accuracy.reset()
 
     def disable_quantizer(self):
         self.backbone.disable_quantizer()

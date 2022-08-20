@@ -11,6 +11,7 @@ def dataset_args(parser: ArgumentParser):
     parser.add_argument("--dataset", default='', type=str)
     parser.add_argument("--dataset_path", default='', type=str)
     parser.add_argument("--batch_size", default=128, type=int, help="number of data samples in the mini_batch")
+    parser.add_argument("--dali", action="store_true", help="use DALI")
 
 
 def augmentations_args(parser: ArgumentParser):

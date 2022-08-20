@@ -4,26 +4,26 @@ name: mnist
 ## general args
 # model
 arch : resnet9
-#n_dw_emb : 64
-#n_pw_emb : 64
-#n_f_emb : 512
-#out_planes: 16
-n_dw_emb : 512
-n_pw_emb : 512
+n_dw_emb : 64
+n_pw_emb : 64
 n_f_emb : 512
-out_planes: 32
-beta : 0.5
-gs : 1
+out_planes: 16
+#n_dw_emb : 512
+#n_pw_emb : 512
+#n_f_emb : 512
+#out_planes: 32
+#beta : 0.5
+#gs : 1
 
 # train
-lr : 0.01
-epoch : 60
+lr : 0.001
+epochs : 60
 num_workers : 4
 batch_size : 128
 optimizer : adam
 distributed : 0
 gpus : 1
-use_amp : 1
+use_amp : 0
 method : aq
 warm_epoch : 10
 # data
