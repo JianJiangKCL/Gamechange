@@ -36,8 +36,8 @@ class AqMethod(pl.LightningModule):
     def configure_optimizers(self):
 
         opt = setup_optimizer(self.args, self.backbone)
-        scheduler, interval = setup_scheduler(self.args, opt)
-        return [opt], [{"scheduler": scheduler, "interval": interval}]
+        scheduler = setup_scheduler(self.args, opt)
+        return [opt], [scheduler]
 
     def training_step(self, batch, batch_idx):
         # if self.current_epoch < self.args.warm_epoch:
@@ -46,7 +46,7 @@ class AqMethod(pl.LightningModule):
         #     self.backbone.layer2.quant_mode_()
         x, y = batch
         y_hat = self.backbone(x)
-
+        epoch = self.current_epoch
         ce_loss = self.criterion(y_hat, y)
 
         weight_diff = self.backbone.accumlate_diff_weight()

@@ -23,4 +23,4 @@ source ~/.bashrc
 conda activate KM
 
 cd ..
-python main.py -c configs/cifar10_resnet9.yaml  --dataset_path /jmain02/home/J2AD019/exk04/jxj51-exk04/dataset/CIFAR10  --results_dir results/cifar10 -t lr=0.001 -t beta_f=100  -t out_planes=64 -t n_f_emb=512 -t n_dw_emb=512 -t n_pw_emb=512 -t epochs=100 -t batch_size=128 --scheduler warm_cosine  --distributed
+python main.py -c configs/cifar10_resnet9.yaml  --dataset_path /jmain02/home/J2AD019/exk04/jxj51-exk04/dataset/CIFAR10  --results_dir results/cifar10 -t lr=0.001 -t beta_f=100  -t epochs=100 -t batch_size=32 --scheduler cosine --scheduler_interval epoch --distributed

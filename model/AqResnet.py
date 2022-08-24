@@ -88,7 +88,6 @@ class QuantConv_DW(QuantHelper):
         self.groups = fake_inplanes
         self.conv = partial(F.conv2d, stride=stride, padding=padding, groups=self.groups)
 
-
     def normal_forward(self, x, *args):
         dw_weight = repeat(self.dw_weight, 'o i h w -> (o repeat) i h w', repeat=self.fake_inplanes // self.inp)
         out = self.conv(x, dw_weight)
@@ -127,7 +126,7 @@ class QuantConv_PW(QuantHelper):
         h, w = self.pw_weight.shape[-2:]
         pw_weight = repeat(self.pw_weight, 'o i h w -> o (repeat i) h w', repeat=self.fake_inplanes // self.inp)
         pw_weight = rearrange(pw_weight, 'o i h w -> (o i) () h w', h=h, w=w)
-
+        print(f'pw size {pw_weight.shape}')
         out = self.conv(x, pw_weight)
 
         return out
@@ -185,6 +184,7 @@ class Quant_dwpw2(QuantHelper):
     def __init__(self, inp, oup, n_dw_emb, n_pw_emb, n_f_emb, kernel_size=3, stride=1, padding=0, gs=1,
                  decay=0.99, ret_x=False):
         super().__init__()
+        self.stride = stride
         self.ret_x = ret_x
         self.n_f_emb = n_f_emb
         self.decay = decay
@@ -273,11 +273,6 @@ class Quant_dwpw2(QuantHelper):
         h = self.activation(h)
         return h
 
-    # def forward(self, x):
-    #     if self.use_quant:
-    #         return self.quant_forward(x)
-    #     else:
-    #         return self.normal_forward(x)
 
 class QuantBasicBlock(nn.Module):
     expansion = 1
@@ -287,7 +282,6 @@ class QuantBasicBlock(nn.Module):
 
         self.conv = Quant_dwpw2(inp, oup, n_dw_emb, n_pw_emb, n_f_emb, stride=stride, padding=1, gs=gs,
                                 ret_x=False, decay=decay)
-
 
     def forward(self, x):
         out = self.conv(x)
@@ -316,35 +310,51 @@ class QuantNet(nn.Module):
                  layers=2):
         super().__init__()
         self.oup = oup
-        self.inplanes = oup
-
+        strides = [1, 2, 2, 2]
+        # inps = [16, 24, 32, 64, 96]  # , 160, 320]
+        # inps = [32, 48, 64, 96, 128]  # , 160, 320]
+        inps = [64, 96, 128, 256, 384]
+        # n_dw_embs = [n_emb for n_emb in inps]
+        # n_pw_embs = [n_emb * 2 for n_emb in inps]
+        n_dw_embs = [64] * 5
+        n_pw_embs = [64] * 5
+        n_f_embs = [256] * 5
+        print('inps:', inps)
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, oup, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(oup),
+            nn.Conv2d(in_channels, inps[0], kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(inps[0]),
             nn.LeakyReLU(0.1, inplace=True))
         # the first dwpw layer has fake_inplanes = 1
         self.convs = nn.Sequential()
         # if strides=1 will add much more computation
-        strides = [2, 2, 2]  #[1, 2, 2]
-        oup_list = [oup, oup * 2, oup * 4]
+        # strides = [2, 2, 2]  #[1, 2, 2]
+        # oup_list = [oup, oup * 2, oup * 4]
+
         # self.layers = layers
-        layer_maker = partial(QuantBasicBlock, n_dw_emb=n_dw_emb, n_pw_emb=n_pw_emb, n_f_emb=n_f_emb, gs=gs)
+        layer_maker = partial(QuantBasicBlock, gs=gs)
         decays = [0.99, 0.99]
         #  inp, oup, stride=1,
-        self.layer1 = layer_maker(inp=self.inplanes, oup=oup_list[0], stride=strides[0], decay=decays[0])
+        self.layer1 = layer_maker(inp=inps[0], oup=inps[1], stride=strides[0], decay=decays[0], n_dw_emb=n_dw_embs[0], n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
 
-        self.layer2 = layer_maker(inp=oup_list[0], oup=oup_list[1], stride=strides[1], decay=decays[1])
+        self.layer2 = layer_maker(inp=inps[1], oup=inps[2], stride=strides[1], decay=decays[0], n_dw_emb=n_dw_embs[1], n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
 
-        # self.layer2.straight_mode_()
-
+        self.layer3 = layer_maker(inp=inps[2], oup=inps[3], stride=strides[2], decay=decays[0], n_dw_emb=n_dw_embs[2], n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
+        #
+        # self.layer4 = layer_maker(inp=inps[3], oup=inps[4], stride=strides[3], decay=decays[0], n_dw_emb=n_dw_embs[3], n_pw_emb=n_pw_embs[3], n_f_emb=n_f_embs[3])
+        self.layer1.straight_mode_()
+        self.layer2.straight_mode_()
+        self.layer3.straight_mode_()
+        print('straight mode for layer2 and layer3---------')
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.head = nn.Linear(oup_list[1], num_classes)
+        self.head = nn.Linear(inps[3], num_classes)
 
     def forward(self, x):
         h = self.conv1(x)
         h = self.layer1(h)
         h = self.layer2(h)
+        h = self.layer3(h)
+        # h = self.layer4(h)
         h = self.avg_pool(h)
         h = h.view(h.size(0), -1)
 
@@ -379,6 +389,7 @@ class QuantNet(nn.Module):
         for module in self.modules():
             if isinstance(module, QuantHelper):
                 module.disable_quant()
+
 
 def QuantNet9(in_channels, n_dw_emb, n_pw_emb, n_f_emb, num_classes, gs, **kwargs):
     model = QuantNet(in_channels, n_dw_emb, n_pw_emb, n_f_emb, QuantBasicBlock, [1, 1], num_classes, gs, **kwargs)

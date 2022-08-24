@@ -4,10 +4,7 @@ name: cifar10_resnet9
 ## general args
 # model
 arch : resnet9
-#n_dw_emb : 64
-#n_pw_emb : 64
-#n_f_emb : 512
-#out_planes: 16
+
 n_dw_emb : 512
 n_pw_emb : 512
 n_f_emb : 512

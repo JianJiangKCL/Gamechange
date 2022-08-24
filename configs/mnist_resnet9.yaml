@@ -21,6 +21,8 @@ epochs : 60
 num_workers : 4
 batch_size : 128
 optimizer : adam
+scheduler : cosine
+interval : epoch
 distributed : 0
 gpus : 1
 use_amp : 0
