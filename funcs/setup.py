@@ -26,7 +26,9 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     # load config
-    load_yaml_(args)
+    if args.config_file is not None:
+
+        load_yaml_(args)
     # update args if  temp_args is given
     load_temp_(args)
     #

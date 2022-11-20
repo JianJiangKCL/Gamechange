@@ -7,9 +7,9 @@ from torch.nn.parameter import Parameter
 from einops import rearrange, repeat, reduce
 from functools import partial, wraps
 
-
 from model.quantizer import Quantizer
 from torchvision.models import resnet18, mobilenet_v2
+
 
 def conv3x3(inp, oup, stride=1, groups=1, dilation=1):
     return nn.Conv2d(inp, oup, kernel_size=3, stride=stride,
@@ -44,7 +44,6 @@ class QuantHelper(nn.Module):
     def quant_forward(self, *args):
         pass
 
-
     def forward(self, *args):
         if not self.weight_initalized and hasattr(self, '_init_components'):
             self._init_components(*args)
@@ -62,8 +61,6 @@ class FeatureQuantizer(QuantHelper):
         self.target = QUANT_TYPE.FEATURE
         self.quantizer = Quantizer(dim, n_emb, decay)
         self.diff = torch.Tensor([0]).cuda()
-
-
 
     def normal_forward(self, x):
         return x
@@ -126,7 +123,7 @@ class QuantConv_PW(QuantHelper):
         h, w = self.pw_weight.shape[-2:]
         pw_weight = repeat(self.pw_weight, 'o i h w -> o (repeat i) h w', repeat=self.fake_inplanes // self.inp)
         pw_weight = rearrange(pw_weight, 'o i h w -> (o i) () h w', h=h, w=w)
-        print(f'pw size {pw_weight.shape}')
+        # print(f'pw size {pw_weight.shape}')
         out = self.conv(x, pw_weight)
 
         return out
@@ -218,7 +215,7 @@ class Quant_dwpw2(QuantHelper):
         self.n_fpw_emb2 = self.n_f_emb
 
         self.use_res_connect = self.stride == 1 and inp == oup
-        
+
     def get_groups(self):
         return self.groups
 
@@ -236,7 +233,7 @@ class Quant_dwpw2(QuantHelper):
         out2 = self.dw_conv2(out, self.quantizer_dw2)
         b, c, h3, w3 = out2.shape
         self.feat_quantizer_pw2 = FeatureQuantizer(h3 * w3, self.n_fpw_emb, self.decay).to(x.device)
-        k=1
+        k = 1
 
     def normal_forward(self, x):
         h = self.dw_conv(x, self.quantizer_dw)
@@ -311,9 +308,9 @@ class QuantNet(nn.Module):
         super().__init__()
         self.oup = oup
         strides = [1, 2, 2, 2]
-        # inps = [16, 24, 32, 64, 96]  # , 160, 320]
+        inps = [16, 24, 32, 64, 96]  # , 160, 320]
         # inps = [32, 48, 64, 96, 128]  # , 160, 320]
-        inps = [64, 96, 128, 256, 384]
+        # inps = [64, 96, 128, 256, 384]
         # n_dw_embs = [n_emb for n_emb in inps]
         # n_pw_embs = [n_emb * 2 for n_emb in inps]
         n_dw_embs = [64] * 5
@@ -334,11 +331,14 @@ class QuantNet(nn.Module):
         layer_maker = partial(QuantBasicBlock, gs=gs)
         decays = [0.99, 0.99]
         #  inp, oup, stride=1,
-        self.layer1 = layer_maker(inp=inps[0], oup=inps[1], stride=strides[0], decay=decays[0], n_dw_emb=n_dw_embs[0], n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
+        self.layer1 = layer_maker(inp=inps[0], oup=inps[1], stride=strides[0], decay=decays[0], n_dw_emb=n_dw_embs[0],
+                                  n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
 
-        self.layer2 = layer_maker(inp=inps[1], oup=inps[2], stride=strides[1], decay=decays[0], n_dw_emb=n_dw_embs[1], n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
+        self.layer2 = layer_maker(inp=inps[1], oup=inps[2], stride=strides[1], decay=decays[0], n_dw_emb=n_dw_embs[1],
+                                  n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
 
-        self.layer3 = layer_maker(inp=inps[2], oup=inps[3], stride=strides[2], decay=decays[0], n_dw_emb=n_dw_embs[2], n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
+        self.layer3 = layer_maker(inp=inps[2], oup=inps[3], stride=strides[2], decay=decays[0], n_dw_emb=n_dw_embs[2],
+                                  n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
         #
         # self.layer4 = layer_maker(inp=inps[3], oup=inps[4], stride=strides[3], decay=decays[0], n_dw_emb=n_dw_embs[3], n_pw_emb=n_pw_embs[3], n_f_emb=n_f_embs[3])
         self.layer1.straight_mode_()

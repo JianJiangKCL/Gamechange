@@ -45,6 +45,7 @@ from  torch.distributions import multivariate_normal
 # print(probability)
 # # samples = pd.sample((self.num_sampling,))
 # k=1
-
+import torch
+from torch.nn.functional import softmax
 
 

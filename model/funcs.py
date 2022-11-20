@@ -21,7 +21,7 @@ def create_backbone(args):
         num_classes = 100
     if arch == 'resnet9':
         #in_channels, n_dw_emb, n_pw_emb, n_f_emb, num_classes, gs, **kwargs
-        backbone = QuantNet9(in_channels, args.n_dw_emb, args.n_pw_emb, args.n_f_emb, num_classes=num_classes, gs=args.gs, out_planes=args.out_planes)
+        backbone = QuantNet9(in_channels, args.n_dw_emb, args.n_pw_emb, args.n_f_emb, num_classes=num_classes, gs=args.gs, oup=args.out_planes)
     # elif arch == 'resnet32':
     #     backbone = km_resnet32(n_emb, num_classes=num_classes, gs=args.gs)
     # elif arch == 'resnet50':

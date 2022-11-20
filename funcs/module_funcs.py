@@ -20,17 +20,19 @@ def setup_optimizer(args, model):
 def setup_scheduler(args, opt):
 	if args.scheduler == 'cosine':
 		scheduler = CosineAnnealingLR(opt, args.epochs, eta_min=1e-5)
-		interval = 'step'
+		scheduler_interval = 'step'
 	elif args.scheduler == 'warm_cosine':
 		scheduler = LinearWarmupCosineAnnealingLR(opt, warmup_epochs=args.warmup_epochs, max_epochs=args.epochs, eta_min=1e-5)
-		interval = 'step'
+		scheduler_interval = 'step'
 	elif args.scheduler == 'multistep':
 		op_multi = lambda a, b: int(a * b)
 		MILESTONES = list((map(op_multi, [0.5, 0.75, 0.9], [args.epochs] * 3)))
 		scheduler = MultiStepLR(opt, milestones=MILESTONES, gamma=0.1)
-		interval = 'epoch'
+		scheduler_interval = 'epoch'
 	else:
 		raise NotImplementedError
+	if args.scheduler_interval is not None:
+		scheduler_interval = args.scheduler_interval
 
-	return scheduler, interval
+	return {"scheduler": scheduler, "interval": scheduler_interval}
 

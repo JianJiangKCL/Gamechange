@@ -6,7 +6,7 @@ from funcs.utils_funcs import set_seed
 from model.funcs import create_backbone
 import wandb
 from model.AqMethod import AqMethod
-from args.setup import parse_args, set_logger, set_trainer
+from funcs.setup import parse_args, set_logger, set_trainer
 
 
 def main(local_rank, args):
