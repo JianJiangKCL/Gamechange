@@ -271,6 +271,98 @@ class Quant_dwpw2(QuantHelper):
         return h
 
 
+class Quant_res_pw2(QuantHelper):
+    def __init__(self, inp, oup, n_dw_emb, n_pw_emb, n_f_emb, kernel_size=3, stride=1, padding=0, gs=1,
+                 decay=0.99, ret_x=False):
+        super().__init__()
+        self.stride = stride
+        self.ret_x = ret_x
+        self.n_f_emb = n_f_emb
+        self.decay = decay
+        self.use_quant = True
+        # print('fake_inplanes:', fake_inplanes)
+        self.inp = inp
+        self.oup = oup
+        self.dw_conv = QuantConv_DW(inp, inp, kernel_size, stride, padding)
+        self.bn1 = nn.BatchNorm2d(inp)
+        fake_inplanes = inp
+        self.pw_conv = QuantConv_PW(fake_inplanes, inp, oup)
+
+        self.quantizer_dw = Quantizer(kernel_size ** 2, n_dw_emb)
+        self.quantizer_pw = Quantizer(1, n_pw_emb)
+
+        self.n_fdw_emb = self.n_f_emb
+        self.n_fpw_emb = self.n_f_emb
+        ## second block
+        fake_inplanes = inp * oup
+        self.fake_inplanes = fake_inplanes
+        self.dw_conv2 = QuantConv_DW(fake_inplanes, oup, kernel_size, stride, padding)
+
+        self.pw_conv2 = QuantConv_PW(fake_inplanes, oup, oup)
+        self.bn2 = nn.BatchNorm2d(oup)
+        self.quantizer_dw2 = Quantizer(kernel_size ** 2, n_dw_emb)
+        self.quantizer_pw2 = Quantizer(1, n_pw_emb)
+        # self.activation = nn.ReLU(inplace=True)
+        # leaky relu to make features diverse, have negative values
+        self.activation = nn.LeakyReLU(0.1, inplace=True)
+        self.n_fdw_emb2 = self.n_f_emb
+        self.n_fpw_emb2 = self.n_f_emb
+
+        self.use_res_connect = self.stride == 1 and inp == oup
+
+    def get_groups(self):
+        return self.groups
+
+    def _init_components(self, x):
+        b, c, h1, w1 = x.shape
+        self.feat_quantizer_dw = FeatureQuantizer(h1 * w1, self.n_fdw_emb, self.decay).to(x.device)
+
+        out = self.dw_conv(x, self.quantizer_dw)
+        b, c, h2, w2 = out.shape
+        self.feat_quantizer_pw = FeatureQuantizer(h2 * w2, self.n_fpw_emb, self.decay).to(x.device)
+
+        out = self.pw_conv(out, self.quantizer_pw2)
+        self.feat_quantizer_dw2 = FeatureQuantizer(h2 * w2, self.n_fdw_emb, self.decay).to(x.device)
+
+        out2 = self.dw_conv2(out, self.quantizer_dw2)
+        b, c, h3, w3 = out2.shape
+        self.feat_quantizer_pw2 = FeatureQuantizer(h3 * w3, self.n_fpw_emb, self.decay).to(x.device)
+        k = 1
+
+    def normal_forward(self, x):
+        h = self.dw_conv(x, self.quantizer_dw)
+        # h = self.bn1(h)
+        h = self.activation(h)
+
+        h = self.pw_conv(h, self.quantizer_pw)
+
+        h = self.dw_conv2(h, self.quantizer_dw2)
+        h = self.pw_conv2(h, self.quantizer_pw2)
+        h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.oup, reduction='sum')
+        h = self.bn2(h)
+        h = self.activation(h)
+        return h
+
+    def quant_forward(self, x):
+        h_dw = self.feat_quantizer_dw(x)
+        h_dw = self.dw_conv(h_dw, self.quantizer_dw)
+        # h_dw = self.bn1(h_dw)
+        h_dw = self.activation(h_dw)
+
+        h_pw = self.feat_quantizer_pw(h_dw)
+        h_pw = self.pw_conv(h_pw, self.quantizer_pw)
+        # we don't use activation here, because the maps are not summed up.
+        # if activation is used then the summed results will be different from the original results.
+        h_pw = self.feat_quantizer_dw2(h_pw)
+        h_dw2 = self.dw_conv2(h_pw, self.quantizer_dw2)
+        h_pw2 = self.feat_quantizer_pw2(h_dw2)
+
+        h = self.pw_conv2(h_pw2, self.quantizer_pw2)
+        # summation
+        h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.oup, reduction='sum')
+        h = self.bn2(h)
+        h = self.activation(h)
+        return h
 
 
 class QuantBasicBlock(nn.Module):
