@@ -51,8 +51,7 @@ def set_logger(args, root_dir):
 def set_trainer(args, logger, save_path, kwargs=None):
     extra_kwargs = kwargs
     callbacks = []
-    checkpoint_callback = ModelCheckpoint(dirpath=save_path, save_last=True, monitor='val_loss',
-                                          mode='min', save_top_k=3)
+    checkpoint_callback = ModelCheckpoint(dirpath=save_path, save_last=True)
     callbacks.append(checkpoint_callback)
 
     if args.lr_logger:
@@ -69,8 +68,7 @@ def set_trainer(args, logger, save_path, kwargs=None):
     else:
         gradient_clip_val = 0.0
 
-    kwargs = {'logger': logger, 'enable_checkpointing': True, 'max_epochs': args.epochs,
-              'check_val_every_n_epoch': 10, 'callbacks': callbacks, 'gradient_clip_val': gradient_clip_val, 'gradient_clip_algorithm': "value", 'detect_anomaly': False}
+    kwargs = {'logger': logger, 'enable_checkpointing': True, 'max_epochs': args.epochs, 'callbacks': callbacks, 'gradient_clip_val': gradient_clip_val, 'gradient_clip_algorithm': "value", 'detect_anomaly': False}
 
     if extra_kwargs is not None:
         kwargs.update(extra_kwargs)

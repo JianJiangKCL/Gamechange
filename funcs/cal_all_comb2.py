@@ -188,6 +188,7 @@ def get_comb_consecutive_layer(next_fqtz, dw_group_embs):
         feature_com_keys[k] = v.item()
     return feature_com_keys
 
+
 def get_comb_for_Block(block, next_block_first_f_qtz):
     dwpw_list = []
     shortcut = None
@@ -195,12 +196,12 @@ def get_comb_for_Block(block, next_block_first_f_qtz):
     # if block.stride != 1 or block.in_channels != KmBasicBlock.expansion * block.out_channels:
     #     has_shortcut = True
     for name, m in block.named_modules():
-        if isinstance(m, QuantConv_dwpw):
+        if isinstance(m, Quant_dwpw2):
             dwpw_list.append(m)
 
-        if isinstance(m, KM1x1_shortcut_pw_as_dw):
-            if has_shortcut:
-                shortcut = m
+        # if isinstance(m, KM1x1_shortcut_pw_as_dw):
+        #     if has_shortcut:
+        #         shortcut = m
     dwpw1, dwpw2 = dwpw_list[0], dwpw_list[1]
     # for dwpw1
     dw_comb_keys1, fake_dw_group_comb_keys1, pw_embs1 = get_dwpw_comb(dwpw1)
@@ -208,14 +209,6 @@ def get_comb_for_Block(block, next_block_first_f_qtz):
     # for dwpw2
     dw_comb_keys2, fake_dw_group_comb_keys2, pw_embs2 = get_dwpw_comb(dwpw2)
 
-    # if has_shortcut:
-    #     # shortcut uses the quantized output of first dw convolution
-    #     fake_sc_comb_keys1, sc_embs, sc_car_indcies = get_dw_group_embs(dwpw1.fq_dw.quantizer, shortcut.qtz, shortcut)
-    #
-    #     fake_group_com_keys_add, fake_sc_comb_keys_add, feature_com_keys2 = get_comb_shorcut_with_dw_group(
-    #         next_block_first_f_qtz, pw_embs2, pw_car_indcies2, sc_embs, sc_car_indcies)
-    #     return dw_comb_keys1, fake_dw_group_comb_keys1, feature_com_keys1, dw_comb_keys2, fake_dw_group_comb_keys2, fake_sc_comb_keys1, fake_group_com_keys_add, fake_sc_comb_keys_add, feature_com_keys2
-    # else:
     feature_com_keys2 = get_comb_consecutive_layer(next_block_first_f_qtz, pw_embs2)
     return dw_comb_keys1, fake_dw_group_comb_keys1, feature_com_keys1, dw_comb_keys2, fake_dw_group_comb_keys2, None, None, None, feature_com_keys2
 

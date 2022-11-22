@@ -271,6 +271,8 @@ class Quant_dwpw2(QuantHelper):
         return h
 
 
+
+
 class QuantBasicBlock(nn.Module):
     expansion = 1
 
@@ -301,6 +303,10 @@ class QuantBasicBlock(nn.Module):
             if isinstance(m, Quantizer):
                 m.set_decay(decay)
 
+    def get_block_weight_codes(self):
+        # get layer-wise weight codes; maybe just select the first three, as the last one is not used for fast forward
+        codes_dw1 = self.conv.quantizer_dw.codes
+
 
 class QuantNet(nn.Module):
     def __init__(self, in_channels, n_dw_emb, n_pw_emb, n_f_emb, block, num_blocks, num_classes, gs, oup=3,
@@ -315,7 +321,7 @@ class QuantNet(nn.Module):
         # n_pw_embs = [n_emb * 2 for n_emb in inps]
         n_dw_embs = [64] * 5
         n_pw_embs = [64] * 5
-        n_f_embs = [256] * 5
+        n_f_embs = [512] * 5
         print('inps:', inps)
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, inps[0], kernel_size=3, stride=2, padding=1, bias=False),
@@ -341,10 +347,10 @@ class QuantNet(nn.Module):
                                   n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
         #
         # self.layer4 = layer_maker(inp=inps[3], oup=inps[4], stride=strides[3], decay=decays[0], n_dw_emb=n_dw_embs[3], n_pw_emb=n_pw_embs[3], n_f_emb=n_f_embs[3])
-        self.layer1.straight_mode_()
-        self.layer2.straight_mode_()
-        self.layer3.straight_mode_()
-        print('straight mode for layer2 and layer3---------')
+        # self.layer1.straight_mode_()
+        # self.layer2.straight_mode_()
+        # self.layer3.straight_mode_()
+        # print('straight mode for layer2 and layer3---------')
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.head = nn.Linear(inps[3], num_classes)

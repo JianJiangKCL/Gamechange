@@ -97,8 +97,8 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def load_state_from_ddp(model, state_dict):
-    # create new OrderedDict that does not contain `module.`
+def load_state_dict_flexible_(model, state_dict):
+    # create a new OrderedDict that does not contain `module.`
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
         if 'module.' in k[:7]:

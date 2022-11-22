@@ -1,51 +1,19 @@
-import copy
+def get_BasicBlock_comb(dwpw):
+    quantizer_dw = dwpw.quantizer_dw
+    quantizer_pw = dwpw.quantizer_pw
+    quantizer_dw2 = dwpw.quantizer_dw2
+    quantizer_pw2 = dwpw.quantizer_pw2
+    fq_dw = dwpw.feat_quantizer_dw.quantizer
+    fq_pw = dwpw.feat_quantizer_pw.quantizer
+    fq_dw2 = dwpw.feat_quantizer_dw2.quantizer
+    fq_pw2 = dwpw.feat_quantizer_pw2.quantizer
+    # get layer to pass its stride and padding
+    dw_conv = dwpw.dw_conv
+    pw_conv = dwpw.pw_conv
+    dw_conv2 = dwpw.dw_conv2
+    dw_comb_keys = direct_comb(fq_dw, quantizer_dw, fq_pw, dw_conv)
 
-import torch.nn.functional as F
-from torch.nn.parameter import Parameter
-from einops import rearrange, repeat, reduce
-from functools import partial, wraps
-import torch
-import torch.nn.functional as F
-from torch import nn
-import random
-import numpy as np
-import torch
-from  torch.distributions import multivariate_normal
-# from torch.distributions import Normal, MultivariateNormal
-# def cov(tensor, rowvar=True, bias=False):
-#     """Estimate a covariance matrix (np.cov)
-#     https://gist.github.com/ModarTensai/5ab449acba9df1a26c12060240773110
-#     """
-#     tensor = tensor if rowvar else tensor.transpose(-1, -2)
-#     tensor = tensor - tensor.mean(dim=-1, keepdim=True)
-#     factor = 1 / (tensor.shape[-1] - int(not bool(bias)))
-#     return factor * tensor @ tensor.transpose(-1, -2).conj()
-# delta = 1e-4
-# dim = 512
-# n_emb = 512
-# x = torch.randn(2000, dim)
-# from model.quantizer import Quantizer
-# qtz = Quantizer(dim, n_emb)
-# x, _, _ = qtz(x)
-# best_samples = x
-# mean = best_samples.mean(dim=0)
-# fs_m = best_samples.sub(mean.expand_as(best_samples))
-# cov_mat = fs_m.transpose(0, 1).mm(fs_m) / (len(x) - 1)
-# cov_mat = cov_mat + delta * torch.eye(cov_mat.shape[0])
-# pd = MultivariateNormal(mean, cov_mat)
-# probability = pd.log_prob(x) # torch.exp(pd.log_prob(x))
-# print(probability)
-# sample = pd.sample()
-# probability = pd.log_prob(qtz(x+1)[0])
-# print(probability)
-#
-# normal_dist = MultivariateNormal(torch.zeros(dim)+2, torch.eye(dim))
-# test = normal_dist.sample()
-# probability = pd.log_prob(test)
-# print(probability)
-# # samples = pd.sample((self.num_sampling,))
-# k=1
-import torch
-from torch.nn.functional import softmax
+    pw_comb_keys = direct_comb(fq_pw, quantizer_pw, fq_dw2, pw_conv)
 
-
+    dw2_comb_keys = direct_comb(fq_dw2, quantizer_dw2, fq_pw2, dw_conv2)
+    return dw_comb_keys, pw_comb_keys, dw2_comb_keys
