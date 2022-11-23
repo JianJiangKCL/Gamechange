@@ -1,19 +1,17 @@
-def get_BasicBlock_comb(dwpw):
-    quantizer_dw = dwpw.quantizer_dw
-    quantizer_pw = dwpw.quantizer_pw
-    quantizer_dw2 = dwpw.quantizer_dw2
-    quantizer_pw2 = dwpw.quantizer_pw2
-    fq_dw = dwpw.feat_quantizer_dw.quantizer
-    fq_pw = dwpw.feat_quantizer_pw.quantizer
-    fq_dw2 = dwpw.feat_quantizer_dw2.quantizer
-    fq_pw2 = dwpw.feat_quantizer_pw2.quantizer
-    # get layer to pass its stride and padding
-    dw_conv = dwpw.dw_conv
-    pw_conv = dwpw.pw_conv
-    dw_conv2 = dwpw.dw_conv2
-    dw_comb_keys = direct_comb(fq_dw, quantizer_dw, fq_pw, dw_conv)
+import torch
+import torch.nn as nn
 
-    pw_comb_keys = direct_comb(fq_pw, quantizer_pw, fq_dw2, pw_conv)
+def conv3x3(inp, oup, stride=1, groups=1, dilation=1):
+    return nn.Conv2d(inp, oup, kernel_size=3, stride=stride,
+                     padding=dilation, groups=groups, bias=False, dilation=dilation)
 
-    dw2_comb_keys = direct_comb(fq_dw2, quantizer_dw2, fq_pw2, dw_conv2)
-    return dw_comb_keys, pw_comb_keys, dw2_comb_keys
+
+inputs = torch.randn(1, 1, 32, 32)
+conv1 = conv3x3(1, 1, stride=2, groups=1)
+conv2 = conv3x3(1, 1, stride=1, groups=1)
+
+h1 = conv1(inputs)
+h2 = conv2(h1)
+
+print(h1.shape)
+print(h2.shape)

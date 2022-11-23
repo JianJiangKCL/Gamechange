@@ -10,6 +10,9 @@ from functools import partial, wraps
 from model.quantizer import Quantizer
 from torchvision.models import resnet18, mobilenet_v2
 
+def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
+    """1x1 convolution"""
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 def conv3x3(inp, oup, stride=1, groups=1, dilation=1):
     return nn.Conv2d(inp, oup, kernel_size=3, stride=stride,
@@ -102,13 +105,13 @@ class QuantConv_DW(QuantHelper):
 
 
 class QuantConv_PW(QuantHelper):
-    def __init__(self, fake_inplanes, inp, oup, stride=1, padding=0):
+    def __init__(self, fake_inplanes, inp, oup, kernel_size=1, stride=1, padding=0):
         super().__init__()
         self.fake_inplanes = fake_inplanes
         self.inp = inp
         self.use_quant = True
         self.oup = oup
-        self.pw_weight = Parameter(torch.empty((oup * inp, 1, 1, 1)))
+        self.pw_weight = Parameter(torch.empty((oup * inp, 1, kernel_size, kernel_size)))
         nn.init.kaiming_normal_(self.pw_weight)
         self.groups = oup * fake_inplanes
         self.conv = partial(F.conv2d, stride=stride, padding=padding, groups=self.groups)
@@ -272,8 +275,7 @@ class Quant_dwpw2(QuantHelper):
 
 
 class Quant_res_pw2(QuantHelper):
-    def __init__(self, inp, oup, n_dw_emb, n_pw_emb, n_f_emb, kernel_size=3, stride=1, padding=0, gs=1,
-                 decay=0.99, ret_x=False):
+    def __init__(self, inp, oup, n_pw_emb, n_f_emb, kernel_size=3, stride=1, padding=0, downsample=None, decay=0.99, ret_x=False):
         super().__init__()
         self.stride = stride
         self.ret_x = ret_x
@@ -283,84 +285,78 @@ class Quant_res_pw2(QuantHelper):
         # print('fake_inplanes:', fake_inplanes)
         self.inp = inp
         self.oup = oup
-        self.dw_conv = QuantConv_DW(inp, inp, kernel_size, stride, padding)
-        self.bn1 = nn.BatchNorm2d(inp)
+
+        # self.bn1 = nn.BatchNorm2d(inp)
         fake_inplanes = inp
-        self.pw_conv = QuantConv_PW(fake_inplanes, inp, oup)
+        self.pw_conv = QuantConv_PW(fake_inplanes, inp, oup, kernel_size, stride, padding)
 
-        self.quantizer_dw = Quantizer(kernel_size ** 2, n_dw_emb)
-        self.quantizer_pw = Quantizer(1, n_pw_emb)
-
-        self.n_fdw_emb = self.n_f_emb
+        self.quantizer_pw = Quantizer(kernel_size ** 2, n_pw_emb)
         self.n_fpw_emb = self.n_f_emb
-        ## second block
+
         fake_inplanes = inp * oup
         self.fake_inplanes = fake_inplanes
-        self.dw_conv2 = QuantConv_DW(fake_inplanes, oup, kernel_size, stride, padding)
-
-        self.pw_conv2 = QuantConv_PW(fake_inplanes, oup, oup)
+        # the second conv doesn't have stride as inputs, but we still need padding to keep the shape the same
+        self.pw_conv2 = QuantConv_PW(fake_inplanes, oup, oup, kernel_size, padding=1)
         self.bn2 = nn.BatchNorm2d(oup)
-        self.quantizer_dw2 = Quantizer(kernel_size ** 2, n_dw_emb)
-        self.quantizer_pw2 = Quantizer(1, n_pw_emb)
-        # self.activation = nn.ReLU(inplace=True)
-        # leaky relu to make features diverse, have negative values
-        self.activation = nn.LeakyReLU(0.1, inplace=True)
-        self.n_fdw_emb2 = self.n_f_emb
-        self.n_fpw_emb2 = self.n_f_emb
 
-        self.use_res_connect = self.stride == 1 and inp == oup
+        self.quantizer_pw2 = Quantizer(kernel_size ** 2, n_pw_emb)
+        self.activation = nn.ReLU(inplace=True)
+        # leaky relu to make features diverse, have negative values
+        # self.activation = nn.LeakyReLU(0.1, inplace=True)
+
+        self.n_fpw_emb2 = self.n_f_emb * 2
+
+        # self.use_res_connect = self.stride == 1 and inp == oup
+
+        self.downsample = downsample
 
     def get_groups(self):
         return self.groups
 
     def _init_components(self, x):
-        b, c, h1, w1 = x.shape
-        self.feat_quantizer_dw = FeatureQuantizer(h1 * w1, self.n_fdw_emb, self.decay).to(x.device)
+        h1, w1 = x.shape[-2:]
+        self.feat_quantizer_pw = FeatureQuantizer(h1 * w1, self.n_fpw_emb, self.decay).to(x.device)
 
-        out = self.dw_conv(x, self.quantizer_dw)
-        b, c, h2, w2 = out.shape
-        self.feat_quantizer_pw = FeatureQuantizer(h2 * w2, self.n_fpw_emb, self.decay).to(x.device)
-
-        out = self.pw_conv(out, self.quantizer_pw2)
-        self.feat_quantizer_dw2 = FeatureQuantizer(h2 * w2, self.n_fdw_emb, self.decay).to(x.device)
-
-        out2 = self.dw_conv2(out, self.quantizer_dw2)
-        b, c, h3, w3 = out2.shape
-        self.feat_quantizer_pw2 = FeatureQuantizer(h3 * w3, self.n_fpw_emb, self.decay).to(x.device)
-        k = 1
+        out = self.pw_conv(x, self.quantizer_pw)
+        h2, w2 = out.shape[-2:]
+        self.feat_quantizer_pw2 = FeatureQuantizer(h2 * w2, self.n_fpw_emb, self.decay).to(x.device)
 
     def normal_forward(self, x):
-        h = self.dw_conv(x, self.quantizer_dw)
+        identity = x
+        h = self.pw_conv(x, self.quantizer_pw)
         # h = self.bn1(h)
         h = self.activation(h)
 
-        h = self.pw_conv(h, self.quantizer_pw)
-
-        h = self.dw_conv2(h, self.quantizer_dw2)
         h = self.pw_conv2(h, self.quantizer_pw2)
+
         h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.oup, reduction='sum')
         h = self.bn2(h)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        h += identity
         h = self.activation(h)
+
         return h
 
     def quant_forward(self, x):
-        h_dw = self.feat_quantizer_dw(x)
-        h_dw = self.dw_conv(h_dw, self.quantizer_dw)
-        # h_dw = self.bn1(h_dw)
-        h_dw = self.activation(h_dw)
-
-        h_pw = self.feat_quantizer_pw(h_dw)
+        identity = x
+        # print('shape of x ', x.size())
+        h_pw = self.feat_quantizer_pw(x)
         h_pw = self.pw_conv(h_pw, self.quantizer_pw)
+        # print('size of hpw1', h_pw.size())
         # we don't use activation here, because the maps are not summed up.
         # if activation is used then the summed results will be different from the original results.
-        h_pw = self.feat_quantizer_dw2(h_pw)
-        h_dw2 = self.dw_conv2(h_pw, self.quantizer_dw2)
-        h_pw2 = self.feat_quantizer_pw2(h_dw2)
-
-        h = self.pw_conv2(h_pw2, self.quantizer_pw2)
+        h_pw = self.feat_quantizer_pw2(h_pw)
+        h = self.pw_conv2(h_pw, self.quantizer_pw2)
+        # print('size of hpw2', h.size())
         # summation
         h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.oup, reduction='sum')
         h = self.bn2(h)
+        # print('after reduce', h.size())
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        h += identity
         h = self.activation(h)
         return h
 
@@ -368,16 +364,13 @@ class Quant_res_pw2(QuantHelper):
 class QuantBasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, n_dw_emb, n_pw_emb, n_f_emb, inp, oup, stride=1, gs=1, decay=0.99):
+    def __init__(self, inp, oup, n_pw_emb, n_f_emb, stride=1, downsample=None, decay=0.99):
         super().__init__()
 
-        self.conv = Quant_dwpw2(inp, oup, n_dw_emb, n_pw_emb, n_f_emb, stride=stride, padding=1, gs=gs,
-                                ret_x=False, decay=decay)
+        self.conv = Quant_res_pw2(inp, oup, n_pw_emb, n_f_emb, stride=stride, padding=1, downsample=downsample, ret_x=False, decay=decay)
 
     def forward(self, x):
         out = self.conv(x)
-
-        # todo maybe bn as well
         return out
 
     def straight_mode_(self):
@@ -406,14 +399,14 @@ class QuantNet(nn.Module):
         super().__init__()
         self.oup = oup
         strides = [1, 2, 2, 2]
-        inps = [16, 24, 32, 64, 96]  # , 160, 320]
+        # inps = [16, 24, 32, 64, 96]  # , 160, 320]
         # inps = [32, 48, 64, 96, 128]  # , 160, 320]
         # inps = [64, 96, 128, 256, 384]
-        # n_dw_embs = [n_emb for n_emb in inps]
-        # n_pw_embs = [n_emb * 2 for n_emb in inps]
+        inps = [16, 32, 64, 128, 256]
+        self.inplanes = inps[0]
         n_dw_embs = [64] * 5
         n_pw_embs = [64] * 5
-        n_f_embs = [512] * 5
+        n_f_embs = [256] * 5
         print('inps:', inps)
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, inps[0], kernel_size=3, stride=2, padding=1, bias=False),
@@ -422,30 +415,50 @@ class QuantNet(nn.Module):
         # the first dwpw layer has fake_inplanes = 1
         self.convs = nn.Sequential()
         # if strides=1 will add much more computation
-        # strides = [2, 2, 2]  #[1, 2, 2]
+        strides = [1, 2, 2, 2]
+        num_blocks = [1 , 1, 1, 1]
         # oup_list = [oup, oup * 2, oup * 4]
-
+        # self, block, quant_arch, planes, blocks, stride, n_pw_emb, n_f_emb):
+        self.layer1 = self.make_layer(block, inps[0], num_blocks[0], stride=strides[0], n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
+        self.layer2 = self.make_layer(block, inps[1], num_blocks[1], stride=strides[1], n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
+        self.layer3 = self.make_layer(block, inps[2], num_blocks[2], stride=strides[2], n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
         # self.layers = layers
-        layer_maker = partial(QuantBasicBlock, gs=gs)
-        decays = [0.99, 0.99]
+        # layer_maker = partial(QuantBasicBlock, gs=gs, quant_arch=Quant_res_pw2)
+        # decays = [0.99, 0.99]
         #  inp, oup, stride=1,
-        self.layer1 = layer_maker(inp=inps[0], oup=inps[1], stride=strides[0], decay=decays[0], n_dw_emb=n_dw_embs[0],
-                                  n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
-
-        self.layer2 = layer_maker(inp=inps[1], oup=inps[2], stride=strides[1], decay=decays[0], n_dw_emb=n_dw_embs[1],
-                                  n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
-
-        self.layer3 = layer_maker(inp=inps[2], oup=inps[3], stride=strides[2], decay=decays[0], n_dw_emb=n_dw_embs[2],
-                                  n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
+        # self.layer1 = layer_maker(inp=inps[0], oup=inps[1], stride=strides[0], decay=decays[0], n_dw_emb=n_dw_embs[0],
+        #                           n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])
         #
-        # self.layer4 = layer_maker(inp=inps[3], oup=inps[4], stride=strides[3], decay=decays[0], n_dw_emb=n_dw_embs[3], n_pw_emb=n_pw_embs[3], n_f_emb=n_f_embs[3])
+        # self.layer2 = layer_maker(inp=inps[1], oup=inps[2], stride=strides[1], decay=decays[0], n_dw_emb=n_dw_embs[1],
+        #                           n_pw_emb=n_pw_embs[1], n_f_emb=n_f_embs[1])
+        #
+        # self.layer3 = layer_maker(inp=inps[2], oup=inps[3], stride=strides[2], decay=decays[0], n_dw_emb=n_dw_embs[2],
+        #                           n_pw_emb=n_pw_embs[2], n_f_emb=n_f_embs[2])
+
         # self.layer1.straight_mode_()
         # self.layer2.straight_mode_()
         # self.layer3.straight_mode_()
         # print('straight mode for layer2 and layer3---------')
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        self.head = nn.Linear(inps[3], num_classes)
+        self.head = nn.Linear(inps[2], num_classes)
+
+    def make_layer(self, block, planes, blocks, stride, n_pw_emb, n_f_emb):
+        downsample = None
+        if stride != 1 or self.inplanes != planes:
+            downsample = nn.Sequential(
+                conv1x1(self.inplanes, planes * block.expansion, stride),
+                nn.BatchNorm2d(planes * block.expansion),
+            )
+        layers = []
+        # inp, oup, n_pw_emb, n_f_emb, stride=1, downsample=None, decay=0.99
+        layers.append(block(self.inplanes, planes, n_pw_emb=n_pw_emb, n_f_emb=n_f_emb, stride=stride, downsample=downsample))
+        self.inplanes = planes
+        for _ in range(1, blocks):
+            layers.append(
+                block(self.inplanes, planes, n_pw_emb=n_pw_emb, n_f_emb=n_f_emb, stride=stride, downsample=downsample)
+            )
+        return nn.Sequential(*layers)
 
     def forward(self, x):
         h = self.conv1(x)
