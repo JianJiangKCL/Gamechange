@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 import logging
-from model.AqResnet import  QuantConv_DW,FeatureQuantizer, QuantConv_PW, QuantNet9, Quant_dwpw2, QuantBasicBlock
+from models.AqResnet import  QuantConv_DW,FeatureQuantizer, QuantConv_PW, QuantNet9, Quant_dwpw2, QuantBasicBlock
 from torchvision.datasets import MNIST
 from tqdm import tqdm
 import os
@@ -409,10 +409,10 @@ def main(args):
     n_dw_emb, n_pw_emb, n_femb = args.n_dw_emb, args.n_pw_emb, args.n_femb
     model = km_resnet9(1, n_dw_emb, n_pw_emb, n_femb, num_classes=10, gs=1).cuda()
 
-    # model = model.load_state_dict(torch.load(args.model_pt_path)['model'])
+    # models = models.load_state_dict(torch.load(args.model_pt_path)['models'])
     initial_input = torch.randn(12, 1, 28, 28).cuda()
     model(initial_input)
-    checkpoints = torch.load(args.model_pt_path)['model']
+    checkpoints = torch.load(args.model_pt_path)['models']
     model.load_state_dict(checkpoints)
 
     dataset_path = args.dataset_path
@@ -439,15 +439,15 @@ def main(args):
             module.mode = 'quant'
     loader = tqdm(test_loader)
     ###
-    # test original model
+    # test original models
     # acc_sum = 0
     # n_sum = 0
-    # model = model.cuda()
+    # models = models.cuda()
     # for x, y in loader:
     #     y = y.cuda()
     #     x = x.cuda()
     #     with torch.no_grad():
-    #         logits = model(x)
+    #         logits = models(x)
     #         logits = logits.view(logits.size(0), -1)
     #
     #         _, winners = (logits).max(1)
@@ -512,10 +512,10 @@ def main(args):
         features = rearrange(features_ori, 'b c h w -> b c (h w)')
         f_codes = first_f_qtz.encode(features).detach().numpy()
         for block, w_codes_dict, numpy_dict in zip(blocks, w_codes_dict_list, numpy_dict_list):
-            # model = model.cuda()
+            # models = models.cuda()
             # test_f = rearrange(features_ori[0, torch.LongTensor([14, 22, 15])], 'c h w -> () c (h w)')
-            # test_w = model.conv2_x.KmRes0.conv1.dw
-            # test_fid = model.fq_dw2.quantizer.encode(test_f)
+            # test_w = models.conv2_x.KmRes0.conv1.dw
+            # test_fid = models.fq_dw2.quantizer.encode(test_f)
             # _, f_id1, f_id2, f_id3, f_id4 = block.debug_forward(features_ori.cuda())
             model = model.cpu()
             f_codes = fast_forward_block(block, f_codes, w_codes_dict, numpy_dict)
@@ -548,8 +548,8 @@ def main(args):
     k = 1
 
 
-# comb_keys_list = test_dw_comb(model)
-# fake_comb_keys_list, feature_com_keys_list = test_dw_group_comb(model)
+# comb_keys_list = test_dw_comb(models)
+# fake_comb_keys_list, feature_com_keys_list = test_dw_group_comb(models)
 
 
 if __name__ == "__main__":

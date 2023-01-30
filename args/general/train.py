@@ -19,3 +19,4 @@ def train_args(parser: ArgumentParser):
 	parser.add_argument("--use_amp", choices=[0, 1], default=1, type=int, help="use apex for mixed precision training")
 	parser.add_argument("--use_swa", choices=[0, 1], default=0, type=int, help="use Stochastic Weight Averaging")
 	parser.add_argument("--grad_clip", choices=[0, 1], default=0, type=int, help="use gradient clipping")
+	parser.add_argument("--milestones", default=None, type=int, nargs='+')

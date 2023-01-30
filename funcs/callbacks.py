@@ -4,11 +4,11 @@ from typing import Any, Dict, Optional, Union
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities import rank_zero_only
-from model.AqMethod import AqMethod
+from models.AqMethod import AqMethod
 
 class EMA(pl.Callback):
-    """Implements EMA (exponential moving average) to any kind of model. EMA weights will be used during validation
-    and stored separately from original model weights.
+    """Implements EMA (exponential moving average) to any kind of models. EMA weights will be used during validation
+    and stored separately from original models weights.
     How to use EMA:
         - Sometimes, last EMA checkpoint isn't the best as EMA weights metrics can show long oscillations in time. See
           https://github.com/rwightman/pytorch-image-models/issues/102
@@ -27,7 +27,7 @@ class EMA(pl.Callback):
     def __init__(self, decay: float = 0.9999, ema_device: Optional[Union[torch.device, str]] = None, pin_memory=True):
         super().__init__()
         self.decay = decay
-        self.ema_device: str = f"{ema_device}" if ema_device else None  # perform ema on different device from the model
+        self.ema_device: str = f"{ema_device}" if ema_device else None  # perform ema on different device from the models
         self.ema_pin_memory = pin_memory if torch.cuda.is_available() else False  # Only works if CUDA is available
         self.ema_state_dict: Dict[str, torch.Tensor] = {}
         self.original_state_dict = {}

@@ -89,7 +89,7 @@ def main(args):
 
     # pt2_path = 'results/sumbaseline/default/checkpoints/best_model.pth'
     # pt2 = torch.load(pt2_path)
-    # model.load_state_dict(pt2, strict=False)
+    # models.load_state_dict(pt2, strict=False)
 
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = create_optimizer(args, model)
@@ -109,7 +109,7 @@ def main(args):
             torch.save(model.state_dict(), os.path.join(ckpt_path, f'best_model.pth'))
 
     torch.save({
-        'model': model.state_dict(),
+        'models': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'epochs': epochs + 1
     }, os.path.join(ckpt_path, 'epoch_'+str(epochs)+'.pth'))
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_freq", default=100, type=int)
     parser.add_argument("--tag", default='default', type=str)
     
-    parser.add_argument("--model", default='QuantNet9', type=str)
+    parser.add_argument("--models", default='QuantNet9', type=str)
     parser.add_argument("--out_planes", default=64, type=int)
     parser.add_argument("--layers", default=2, type=int)
     parser.add_argument("--n_dw_emb", default=100, type=int)

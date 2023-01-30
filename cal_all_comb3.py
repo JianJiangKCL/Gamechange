@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 import logging
-from model.AqResnet import  QuantConv_DW,FeatureQuantizer, QuantConv_PW, QuantNet9, Quant_dwpw2, QuantBasicBlock
+from models.AqResnet import  QuantConv_DW,FeatureQuantizer, QuantConv_PW, QuantNet9, Quant_dwpw2, QuantBasicBlock
 from torchvision.datasets import MNIST
 from tqdm import tqdm
 import os
@@ -21,9 +21,9 @@ from torch.cuda.amp import GradScaler
 from funcs.utils_funcs import set_seed, load_state_dict_flexible_
 from einops import rearrange, repeat
 from numpy import sqrt
-from model.funcs import create_backbone
+from models.funcs import create_backbone
 import wandb
-from model.AqMethod import AqMethod
+from models.AqMethod import AqMethod
 from funcs.setup import parse_args, set_logger, set_trainer
 from data import create_dataset
 
@@ -94,6 +94,21 @@ def get_BasicBlock_comb(dwpw):
 
     dw2_comb_keys = direct_comb(fq_dw2, quantizer_dw2, fq_pw2, dw_conv2)
     return dw_comb_keys, pw_comb_keys, dw2_comb_keys
+
+
+def get_comb_Block_2conv(block):
+    quantizer_pw = block.quantizer_pw
+    quantizer_pw2 = block.quantizer_pw2
+
+    pw_conv = block.pw_conv
+    pw_conv2 = block.pw_conv2
+
+    fq_pw = block.feat_quantizer_pw.quantizer
+    fq_pw2 = block.feat_quantizer_pw2.quantizer
+
+    pw_comb_keys = direct_comb(fq_pw, quantizer_pw, fq_pw2, pw_conv)
+
+    return pw_comb_keys
 
 
 def get_comb_for_model(model):
@@ -201,7 +216,7 @@ def main(args):
     model = create_backbone(args)
     model = model.cuda()
     model.eval()
-    # initial model to create the feature quantizer
+    # initial models to create the feature quantizer
     initial_input = torch.randn(12, 1, 28, 28).cuda()
     model(initial_input)
     checkpoints = torch.load(args.finetune)
@@ -242,12 +257,12 @@ def main(args):
     np.savez(os.path.join(save_path, 'comb_keys_list.npz'), numpy_dict_list=numpy_dict_list)
 
     # numpy_dict_list = np.load(os.path.join(save_path, 'comb_keys_list.npz'))['numpy_dict_list']
-    # blocks = [block for block in model.modules() if isinstance(block, KmBasicBlock)]
+    # blocks = [block for block in models.modules() if isinstance(block, KmBasicBlock)]
 
 
 
-    # avg_pool = model.avg_pool
-    # last_layer = model.last_layer
+    # avg_pool = models.avg_pool
+    # last_layer = models.last_layer
     # acc_sum = 0
     # n_sum = 0
     #
@@ -256,16 +271,16 @@ def main(args):
     #     y = y.to(device)
     #     x = x.to(device)
     #
-    #     features_ori = model.conv1(x)
+    #     features_ori = models.conv1(x)
     #     features = rearrange(features_ori, 'b c h w -> b c (h w)')
     #     f_codes = first_f_qtz.encode(features).detach().numpy()
     #     for block, w_codes_dict, numpy_dict in zip(blocks, w_codes_dict_list, numpy_dict_list):
-    #         # model = model.cuda()
+    #         # models = models.cuda()
     #         # test_f = rearrange(features_ori[0, torch.LongTensor([14, 22, 15])], 'c h w -> () c (h w)')
-    #         # test_w = model.conv2_x.KmRes0.conv1.dw
-    #         # test_fid = model.fq_dw2.quantizer.encode(test_f)
+    #         # test_w = models.conv2_x.KmRes0.conv1.dw
+    #         # test_fid = models.fq_dw2.quantizer.encode(test_f)
     #         # _, f_id1, f_id2, f_id3, f_id4 = block.debug_forward(features_ori.cuda())
-    #         model = model.cpu()
+    #         models = models.cpu()
     #         f_codes = fast_forward_block(block, f_codes, w_codes_dict, numpy_dict)
     #     f_codes = torch.from_numpy(f_codes).long()
     #     out_features = last_f_qtz.embed_code(f_codes.to(device))
@@ -296,8 +311,8 @@ def main(args):
     k = 1
 
 
-# comb_keys_list = test_dw_comb(model)
-# fake_comb_keys_list, feature_com_keys_list = test_dw_group_comb(model)
+# comb_keys_list = test_dw_comb(models)
+# fake_comb_keys_list, feature_com_keys_list = test_dw_group_comb(models)
 
 if __name__ == "__main__":
     args = parse_args()

@@ -3,9 +3,9 @@ import logging
 from torch.utils.data import DataLoader
 from data import create_dataset
 from funcs.utils_funcs import set_seed
-from model.funcs import create_backbone
+from models.funcs import create_backbone
 import wandb
-from model.AqMethod import AqMethod
+from models.AqMethod import AqMethod
 from funcs.setup import parse_args, set_logger, set_trainer
 
 

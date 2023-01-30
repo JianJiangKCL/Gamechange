@@ -4,7 +4,7 @@ import torch
 from torch.nn import functional as F
 from einops import rearrange
 
-from model.AqResnet import QuantNet9
+from models.AqResnet import QuantNet9
 def create_backbone(args):
     arch = args.arch
 

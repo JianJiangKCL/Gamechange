@@ -13,9 +13,9 @@ from timm.utils.metrics import AverageMeter, accuracy
 
 from logger import config_logging
 from data import create_dataset
-from model import AqResnet as models
+from models import AqResnet as models
 from utils import CofStepController, set_seed
-from model.AqResnet import FeatureQuantizer, QuantConv_DW, QuantConv_PW
+from models.AqResnet import FeatureQuantizer, QuantConv_DW, QuantConv_PW
 
 
 def train_epoch(epochs, model, criterion, loader, optimizer, scaler, autocast, device, diff_cof=0.5, max_norm=0):
@@ -44,7 +44,7 @@ def train_epoch(epochs, model, criterion, loader, optimizer, scaler, autocast, d
         scaler.scale(loss).backward()
         # scaler.unscale_(optimizer)
         # if max_norm > 0.:
-        #     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        #     torch.nn.utils.clip_grad_norm_(models.parameters(), max_norm)
         scaler.step(optimizer)
         scaler.update()
         
@@ -104,18 +104,18 @@ def main(args):
 
 
     # inpt = torch.randn((1, in_channels, 28, 28)).to(args.device)
-    # model(inpt)
-    # # for m in model.modules():
+    # models(inpt)
+    # # for m in models.modules():
     # #     if isinstance(m, QuantHelper):
     # #         if not isinstance(m, FeatureQuantizer):
     # #             # m.set_quant_mode(args.quant_mode)
     # #             m.set_quant_mode(False)
-    # model.zero_buffer()
+    # models.zero_buffer()
     # del inpt
 
     # pt2_path = 'results/sumbaseline/default/checkpoints/best_model.pth'
     # pt2 = torch.load(pt2_path)
-    # model.load_state_dict(pt2, strict=False)
+    # models.load_state_dict(pt2, strict=False)
     test_state = model.state_dict()
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = create_optimizer(args, model)
@@ -135,7 +135,7 @@ def main(args):
     sumbaseline.load_state_dict(pt2, strict=False)
 
     for epochs in range(args.epochs):
-        # train_epoch(epochs, model, criterion, train_loader, optimizer, scaler, autocast, args.device, cof_controller.cof, args.clip_grad)
+        # train_epoch(epochs, models, criterion, train_loader, optimizer, scaler, autocast, args.device, cof_controller.cof, args.clip_grad)
         acc = test_epoch(epochs, model, test_loader, args.device)
         test_epoch_sumbaseline(epochs, sumbaseline, test_loader, args.device)
         if acc > best_acc:
@@ -160,7 +160,7 @@ def main(args):
         
         # if (epochs + 1) % args.save_freq == 0 or (epochs + 1) == args.epochs:
     torch.save({
-        'model': model.state_dict(),
+        'models': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'epochs': epochs + 1
     }, os.path.join(ckpt_path, 'epoch_'+str(epochs)+'.pth'))
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_freq", default=100, type=int)
     parser.add_argument("--tag", default='default', type=str)
     
-    parser.add_argument("--model", default='QuantNet9', type=str)
+    parser.add_argument("--models", default='QuantNet9', type=str)
     parser.add_argument("--inplanes", default=64, type=int)
     parser.add_argument("--layers", default=2, type=int)
     parser.add_argument("--n_dw_emb", default=100, type=int)

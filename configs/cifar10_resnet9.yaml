@@ -2,7 +2,7 @@
 project: AQ
 name: cifar10_resnet9
 ## general args
-# model
+# models
 arch : resnet9
 
 n_dw_emb : 512

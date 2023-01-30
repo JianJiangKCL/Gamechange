@@ -514,7 +514,7 @@ class GroupedWeight_MLP(nn.Module):
         self.quantizer = Quantize(dim_quant, n_embed)
         # self.get_w_ids()
 
-    # doesn't work; model.eval() didn't call this
+    # doesn't work; models.eval() didn't call this
     def eval(self):
         self.get_w_ids()
         self.train(False)

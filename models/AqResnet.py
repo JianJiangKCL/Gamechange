@@ -7,7 +7,7 @@ from torch.nn.parameter import Parameter
 from einops import rearrange, repeat, reduce
 from functools import partial, wraps
 
-from model.quantizer import Quantizer
+from models.quantizer import Quantizer
 from torchvision.models import resnet18, mobilenet_v2
 
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
@@ -304,8 +304,9 @@ class Quant_res_pw2(QuantHelper):
         # leaky relu to make features diverse, have negative values
         # self.activation = nn.LeakyReLU(0.1, inplace=True)
 
-        self.n_fpw_emb2 = self.n_f_emb * 2
-
+        self.n_fpw_emb2 = round(self.n_f_emb )
+        # *2 cause overload of gpu; /2 make it work
+        self.n_fpw_emb_end = round(self.n_f_emb/2)
         # self.use_res_connect = self.stride == 1 and inp == oup
 
         self.downsample = downsample
@@ -319,7 +320,11 @@ class Quant_res_pw2(QuantHelper):
 
         out = self.pw_conv(x, self.quantizer_pw)
         h2, w2 = out.shape[-2:]
-        self.feat_quantizer_pw2 = FeatureQuantizer(h2 * w2, self.n_fpw_emb, self.decay).to(x.device)
+        self.feat_quantizer_pw2 = FeatureQuantizer(h2 * w2, self.n_fpw_emb2, self.decay).to(x.device)
+
+        out = self.pw_conv2(out, self.quantizer_pw2)
+        h_end, w_end = out.shape[-2:]
+        self.feat_quantizer_end = FeatureQuantizer(h_end * w_end, self.n_fpw_emb_end, self.decay).to(x.device)
 
     def normal_forward(self, x):
         identity = x
@@ -349,6 +354,7 @@ class Quant_res_pw2(QuantHelper):
         # if activation is used then the summed results will be different from the original results.
         h_pw = self.feat_quantizer_pw2(h_pw)
         h = self.pw_conv2(h_pw, self.quantizer_pw2)
+        h = self.feat_quantizer_end(h)
         # print('size of hpw2', h.size())
         # summation
         h = reduce(h, 'b (gc c) h w -> b gc h w', gc=self.oup, reduction='sum')
@@ -398,15 +404,15 @@ class QuantNet(nn.Module):
                  layers=2):
         super().__init__()
         self.oup = oup
-        strides = [1, 2, 2, 2]
+
         # inps = [16, 24, 32, 64, 96]  # , 160, 320]
         # inps = [32, 48, 64, 96, 128]  # , 160, 320]
         # inps = [64, 96, 128, 256, 384]
-        inps = [16, 32, 64, 128, 256]
+        inps = [16] * 5
         self.inplanes = inps[0]
-        n_dw_embs = [64] * 5
-        n_pw_embs = [64] * 5
-        n_f_embs = [256] * 5
+        n_dw_embs = [n_dw_emb] * 5
+        n_pw_embs = [n_pw_emb] * 5
+        n_f_embs = [n_f_emb] * 5
         print('inps:', inps)
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, inps[0], kernel_size=3, stride=2, padding=1, bias=False),
@@ -416,7 +422,7 @@ class QuantNet(nn.Module):
         self.convs = nn.Sequential()
         # if strides=1 will add much more computation
         strides = [1, 2, 2, 2]
-        num_blocks = [1 , 1, 1, 1]
+        num_blocks = [1, 1, 1, 1]
         # oup_list = [oup, oup * 2, oup * 4]
         # self, block, quant_arch, planes, blocks, stride, n_pw_emb, n_f_emb):
         self.layer1 = self.make_layer(block, inps[0], num_blocks[0], stride=strides[0], n_pw_emb=n_pw_embs[0], n_f_emb=n_f_embs[0])

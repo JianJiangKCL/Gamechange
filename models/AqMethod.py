@@ -3,7 +3,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import MultiStepLR
 from torch import optim
 
-from model.funcs import create_backbone
+from models.funcs import create_backbone
 from pytorch_lightning.utilities import AttributeDict
 from typing import Union
 import torch.nn.functional as F
@@ -34,9 +34,10 @@ class AqMethod(pl.LightningModule):
             self.backbone = backbone
 
     def configure_optimizers(self):
-
         opt = setup_optimizer(self.args, self.backbone)
-        scheduler = setup_scheduler(self.args, opt)
+        scheduler = setup_scheduler(self.args, opt, milestones=self.args.milestones)
+        if scheduler is None:
+            return opt
         return [opt], [scheduler]
 
     def training_step(self, batch, batch_idx):

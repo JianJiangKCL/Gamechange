@@ -2,12 +2,16 @@
 project: AQ
 name: mnist
 ## general args
-# model
+# models
 arch : resnet9
-n_dw_emb : 64
-n_pw_emb : 64
-n_f_emb : 512
-out_planes: 16
+#n_dw_emb : 64
+#n_pw_emb : 64
+#n_f_emb : 512
+#outof memory
+n_dw_emb : 32
+n_pw_emb : 32
+n_f_emb : 32
+out_planes: 8
 #n_dw_emb : 512
 #n_pw_emb : 512
 #n_f_emb : 512
@@ -16,12 +20,12 @@ out_planes: 16
 #gs : 1
 
 # train
-lr : 0.001
+lr : 0.004
 epochs : 60
 num_workers : 4
 batch_size : 128
-optimizer : adam
-scheduler : cosine
+optimizer : lamb
+scheduler : constant
 interval : epoch
 distributed : 0
 gpus : 1

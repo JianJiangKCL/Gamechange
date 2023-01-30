@@ -4,13 +4,19 @@ import torchvision.transforms as transforms
 
 def create_dataset(dataset_name, dataset_path, train=True):
     dataset = dataset_name.lower()
-    assert dataset in ['mnist', 'cifar10']
+    assert dataset in ['mnist', 'cifar10', 'omniglot']
     if dataset == 'mnist':
         ds = datasets.MNIST(dataset_path, train=train, transform=create_transform(dataset, train), download=True)
         num_classes, in_channels = 10, 1
     elif dataset == 'cifar10':
         ds = datasets.CIFAR10(dataset_path, train=train, transform=create_transform(dataset, train), download=False)
+
         num_classes, in_channels = 10, 3
+
+    elif dataset == 'omniglot':
+        ds = datasets.Omniglot(dataset_path, background=train, transform=create_transform(dataset, train), download=False)
+        num_classes, in_channels = 1623, 1
+
     return ds, num_classes, in_channels
 
 

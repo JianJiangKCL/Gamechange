@@ -5,7 +5,7 @@ from einops import rearrange
 from torch.profiler import profile, record_function, ProfilerActivity
 import sys
 sys.path.append('..')
-from model.AqResnet import QuantHelper, QUANT_TYPE
+from models.AqResnet import QuantHelper, QUANT_TYPE
 from thop import profile as thop_profile
 from thop import clever_format
 
